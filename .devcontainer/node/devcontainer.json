@@ -1,0 +1,4 @@
+{
+    "name": "Node Tooling Container",
+    "image": "mcr.microsoft.com/devcontainers/javascript-node"
+}

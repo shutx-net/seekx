@@ -1,5 +1,6 @@
 {
     "name": "Go Dev Container",
     "image": "mcr.microsoft.com/devcontainers/go",
-    "forwardPorts": [5050]
+    "forwardPorts": [5050],
+    "appPort": [5050]
 }

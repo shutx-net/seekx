@@ -1,1 +1,6 @@
 /.spec
+
+.env
+
+# go build の出力バイナリ
+/seekx
