@@ -61,7 +61,7 @@ document.addEventListener("click", function (ev) {
     return;
   }
   var cards = list.querySelectorAll(".post"); // DOM は変化しないので 1 度だけ取得（A-15）
-  var countEl = document.getElementById("filter-count"), emptyEl = document.getElementById("filter-empty");
+  var countEl = document.getElementById("filter-count"), emptyEl = document.getElementById("filter-empty"), badgeEl = document.getElementById("filter-summary-count");
   var flagBoxes = [["f-no-reply", "reply"], ["f-no-repost", "repost"], ["f-no-quote", "quote"],
     ["f-no-sensitive", "sensitive"], ["f-no-link", "link"]];
   var timer = null;
@@ -101,6 +101,7 @@ document.addEventListener("click", function (ev) {
       c.setAttribute("hidden", "");
     }
     countEl.textContent = shown + " / " + cards.length + " 件表示中";
+    badgeEl.textContent = shown === cards.length ? "" : shown + " / " + cards.length + " 件表示中"; // 空なら CSS の :empty で消える
     if (shown === 0) emptyEl.removeAttribute("hidden");
     else emptyEl.setAttribute("hidden", "");
   }

@@ -678,6 +678,52 @@ func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 // 確認する。リソースを返さない 400 / 429 は無課金（README のコスト表）。
 // 失敗時も計上していた不具合の回帰テスト。「常に計上しない」という誤修正でも通らないよう、
 // 成功時に計上されることも同時に固定する。
+// TestFilterAccordion は絞り込みがアコーディオンとして描画され、既定で閉じていることを
+// 確認する。件数表示とコスト注記は折りたたみの中、絞り込み中の件数バッジは summary 側。
+func TestFilterAccordion(t *testing.T) {
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
+	out := resultsHTML(t, app, "search_recent_edge.json")
+
+	i := strings.Index(out, `<details class="filter-details"`)
+	if i < 0 {
+		t.Fatalf("絞り込みが <details> で描画されていない")
+	}
+	end := strings.Index(out[i:], "</details>")
+	if end < 0 {
+		t.Fatalf("</details> が無い")
+	}
+	body := out[i : i+end]
+
+	// 既定は閉じている（open 属性を付けない）。
+	if strings.Contains(body[:strings.Index(body, ">")+1], " open") {
+		t.Error("既定は閉じた状態にする（open を付けない）")
+	}
+	// 件数表示・コスト注記・リセットは折りたたみの中。
+	for _, want := range []string{
+		`id="filter-count"`,
+		`id="filter-cost-note"`,
+		`id="filter-reset"`,
+		`id="filter-summary-count"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%q が <details> の中に無い", want)
+		}
+	}
+	// 件数バッジは summary の中（閉じていても見えるのはここだけ）。
+	sum := body[:strings.Index(body, "</summary>")]
+	if !strings.Contains(sum, `id="filter-summary-count"`) {
+		t.Error("件数バッジは summary の中に置く（閉じているとき唯一見える箇所）")
+	}
+	// バッジは空で出力し、絞り込みが効いたときだけ JS が文字を入れる（CSS の :empty で制御）。
+	if !strings.Contains(sum, `id="filter-summary-count"></span>`) {
+		t.Error("バッジは空要素として出力する（:empty で隠すため）")
+	}
+	// 折りたたみ対象は絞り込みだけ。列数は常に見える。
+	if strings.Contains(body, `name="cols"`) {
+		t.Error("列数の操作部を折りたたみの中に入れてはいけない")
+	}
+}
+
 func TestEstimateChargesCountsOnlyOnSuccess(t *testing.T) {
 	newApp := func(t *testing.T, status int, body string) (*App, http.Handler) {
 		t.Helper()
@@ -918,7 +964,8 @@ func TestPostListMarkup(t *testing.T) {
 	// アクセシビリティ（AC-01 / AC-02 / AC-03 / AC-04）。
 	for _, want := range []string{
 		`<legend>表示列数</legend>`,
-		`<legend>このページの絞り込み（再検索なし）</legend>`,
+		// 絞り込みは fieldset/legend ではなく details/summary。summary がラベル兼トグル。
+		`<summary aria-describedby="filter-scope-note">このページの絞り込み（再検索なし）`,
 		`aria-describedby="cols-note"`,
 		`aria-describedby="filter-scope-note"`,
 		`aria-describedby="f-likes-note"`,
@@ -1040,6 +1087,13 @@ func TestStyleSheetInvariants(t *testing.T) {
 		"align-items: start",
 		".list-controls",
 		".filter-count",
+		".filter-details",
+		// 件数バッジの表示制御は :empty に依存している。消えるとバッジが常時出る。
+		".filter-badge:empty { display: none; }",
+		// summary に display: flex を当てるとネイティブの開閉マーカーが消えるため、
+		// ＋ / − を ::before で自前描画している。消えると開閉できることが分からなくなる。
+		".filter-details > summary::before",
+		".filter-details[open] > summary::before",
 		"@media (max-width: 719px)",
 		"@media (max-width: 1039px)",
 		// 本文の改行は <br> 置換ではなく CSS で表現する（D-24）。

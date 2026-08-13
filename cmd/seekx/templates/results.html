@@ -46,8 +46,12 @@
       <p class="hint" id="cols-note">列数はこのブラウザに保存され、次回以降の検索結果にも適用されます。URL には含めないため、切り替えても再検索は発生しません。画面幅が狭いときは自動的に列数を減らします。</p>
     </fieldset>
 
-    <fieldset aria-describedby="filter-scope-note">
-      <legend>このページの絞り込み（再検索なし）</legend>
+    {{/* 既定は閉じた状態。open 属性は付けず、開閉状態も保存しない（保存すると <details open> の
+         初期値をサーバ側で出せず、読み込み後に JS で開くぶんのチラつきが出る）。
+         閉じているときも絞り込みが効いていることが分かるよう、件数を summary にも出す。 */}}
+    <details class="filter-details" id="filter-details">
+      <summary aria-describedby="filter-scope-note">このページの絞り込み（再検索なし）<span
+        class="filter-badge" id="filter-summary-count"></span></summary>
       <div class="grid2">
         <div class="field">
           <label for="f-runes-min">本文の文字数（最小）</label>
@@ -82,7 +86,7 @@
         <button type="button" id="filter-reset" class="secondary">絞り込みを解除</button>
         <p class="filter-count" id="filter-count" role="status">{{num .Result.ResultCount}} / {{num .Result.ResultCount}} 件表示中</p>
       </div>
-    </fieldset>
+    </details>
   </div>
 
   <div class="post-list" id="post-list">
