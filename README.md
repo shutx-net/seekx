@@ -71,13 +71,17 @@
 | --- | --- |
 | `cmd/seekx/main.go` | エントリポイント、ルーティング、HTTP ハンドラ、ページの ViewModel、テンプレートの embed |
 | `cmd/seekx/templates/` | `html/template`（`//go:embed`） |
-| `cmd/seekx/static/` | CSS と X 公式ロゴ（`//go:embed`） |
+| `cmd/seekx/static/` | CSS・X 公式ロゴ・JS（`//go:embed`） |
+| `cmd/seekx/static/js/` | `boot.js`（`<head>` 同期）と `app.js`（`</body>` 直前） |
 | `internal/xapi/` | X API v2 クライアントとレスポンス型。`Endpoint`・`SearchParams`・公表単価もここ（リトライ、エラー分類、ペーシング、フィクスチャモード） |
 | `internal/view/` | `includes` の結合、ViewModel（`ViewPost` など）の構築、一覧の絞り込みキー（純粋関数のみ） |
 | `internal/query/` | フォームから検索クエリを組み立て、全バリデーション（V01〜V14）を行う |
 | `internal/cost/` | コスト見積り、月次 cap ガード、セッション累計 |
 | `internal/config/` | `Config`、`.env` パーサ、`DefaultPort`、タイムゾーン解決 |
 | `testdata/` | テスト・フィクスチャモード用の JSON（リポジトリ直下のまま） |
+
+`static/` の配置規約: **同じ種類のファイルが 2 つ以上になったらサブディレクトリに分けます。**
+JS は 2 ファイルあるため `static/js/` 配下です。CSS とロゴは 1 つずつなので直下に置いています。
 
 依存の向きは一方向です（`go build ./...` が循環の不在を保証します）。
 
@@ -182,6 +186,6 @@ CSP が実際に守るのは、**将来の変更が API 由来の値を `templat
 `Content-Type: text/javascript` で配信されないと、`nosniff` によりブラウザがスクリプトの
 実行を拒否します。`TestJavaScriptContentType` で固定しています。
 
-JS は `static/boot.js`（`<head>` で同期読み込み。列数を最初のペイントより前に当てるため
-`defer` / `async` は不可）と `static/app.js`（`</body>` 直前）の 2 ファイルです。
+JS は `static/js/boot.js`（`<head>` で同期読み込み。列数を最初のペイントより前に当てるため
+`defer` / `async` は不可）と `static/js/app.js`（`</body>` 直前）の 2 ファイルです。
 外部 CDN は使わず、`<script src>` は `/static/` 配下のみに限定しています。

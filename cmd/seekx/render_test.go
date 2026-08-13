@@ -726,7 +726,7 @@ func TestSecurityHeaders(t *testing.T) {
 	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	router := newRouter(app)
 
-	for _, path := range []string{"/", "/healthz", "/static/style.css", "/static/app.js"} {
+	for _, path := range []string{"/", "/healthz", "/static/style.css", "/static/js/app.js"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -768,7 +768,7 @@ func TestJavaScriptContentType(t *testing.T) {
 	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	router := newRouter(app)
 
-	for _, path := range []string{"/static/boot.js", "/static/app.js"} {
+	for _, path := range []string{"/static/js/boot.js", "/static/js/app.js"} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
@@ -792,10 +792,10 @@ func TestLayoutLoadsExternalScripts(t *testing.T) {
 	}
 	html := string(b)
 
-	if !strings.Contains(html, `<script src="/static/boot.js"></script>`) {
+	if !strings.Contains(html, `<script src="/static/js/boot.js"></script>`) {
 		t.Error("boot.js は属性なし（同期）で読み込む。defer / async は不可（D-43）")
 	}
-	if !strings.Contains(html, `<script src="/static/app.js"></script>`) {
+	if !strings.Contains(html, `<script src="/static/js/app.js"></script>`) {
 		t.Error("app.js が読み込まれていない")
 	}
 	// boot.js は </head> より前、app.js は </body> の直前。
@@ -891,8 +891,8 @@ func TestStickyHeader(t *testing.T) {
 // 上書きされることを確認する（#7）。固定値だとヘッダが折り返した時点で
 // 隙間が空くか、操作部がヘッダの下に潜る。
 func TestHeaderHeightIsMeasured(t *testing.T) {
-	// JS は #9 で static/app.js に移した。
-	b, err := staticFS.ReadFile("static/app.js")
+	// JS は #9 で static/js/app.js に移した。
+	b, err := staticFS.ReadFile("static/js/app.js")
 	if err != nil {
 		t.Fatalf("app.js を読めない: %v", err)
 	}
@@ -1438,7 +1438,7 @@ func TestInlineScriptInvariants(t *testing.T) {
 	// #9 でインライン JS を static/*.js に移した。計測対象も一緒に移してある。
 	// 上限を回避するための移動ではないので、予算と不変条件はそのまま引き継ぐ。
 	var sb strings.Builder
-	for _, name := range []string{"static/boot.js", "static/app.js"} {
+	for _, name := range []string{"static/js/boot.js", "static/js/app.js"} {
 		b, err := staticFS.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s を読めない: %v", name, err)

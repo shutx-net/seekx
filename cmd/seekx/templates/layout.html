@@ -8,7 +8,7 @@
 <title>{{.Title}} | seekx</title>
 <link rel="stylesheet" href="/static/style.css">
 <!-- 列数を最初のペイントより前に当てるため同期読み込み。defer にすると間に合わない。 -->
-<script src="/static/boot.js"></script>
+<script src="/static/js/boot.js"></script>
 </head>
 <body>
 <header class="site-header">
@@ -35,7 +35,7 @@
   <p>取得データは永続化しません（プロセスメモリのみ）。表示は {{.TZ}} 基準です。</p>
   <p>検索は従量課金です（投稿 1 件 $0.005 / counts 1 リクエスト $0.005〜）。ページの再読み込みは再検索になります。</p>
 </footer>
-<script src="/static/app.js"></script>
+<script src="/static/js/app.js"></script>
 </body>
 </html>
 {{- end}}
