@@ -680,6 +680,80 @@ func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 // 成功時に計上されることも同時に固定する。
 // TestFilterAccordion は絞り込みがアコーディオンとして描画され、既定で閉じていることを
 // 確認する。件数表示とコスト注記は折りたたみの中、絞り込み中の件数バッジは summary 側。
+// TestStickyHeader は上部固定の CSS が壊れていないことを確認する。
+// 固定するのはヘッダと一覧の操作部だけで、クエリ表示・メタ情報・ページングは流す。
+func TestStickyHeader(t *testing.T) {
+	b, err := staticFS.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("style.css を読めない: %v", err)
+	}
+	css := string(b)
+
+	// 固定は 720px 以上のみ。狭い画面で固定すると投稿を読む領域が残らない。
+	i := strings.Index(css, "@media (min-width: 720px)")
+	if i < 0 {
+		t.Fatal("固定は @media (min-width: 720px) の中に置く")
+	}
+	// メディアクエリのブロックだけを切り出す（波括弧を数える）。ファイル末尾までを見ると
+	// 無関係な .dialog-close の position: sticky まで数えてしまう。
+	open := strings.Index(css[i:], "{")
+	if open < 0 {
+		t.Fatal("@media のブロックが開いていない")
+	}
+	depth, end := 0, -1
+	for j := i + open; j < len(css); j++ {
+		switch css[j] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = j
+			}
+		}
+		if end >= 0 {
+			break
+		}
+	}
+	if end < 0 {
+		t.Fatal("@media のブロックが閉じていない")
+	}
+	sticky := css[i:end]
+	if n := strings.Count(sticky, "position: sticky"); n != 2 {
+		t.Errorf("固定するのは .site-header と .list-controls の 2 つだけ: position: sticky = %d", n)
+	}
+
+	// 固定要素は必ず背景を塗る。透明だと下のカードが透ける。
+	for _, block := range []string{".site-header {", ".list-controls {"} {
+		j := strings.Index(sticky, block)
+		if j < 0 {
+			t.Errorf("%s が固定ブロックに無い", block)
+			continue
+		}
+		end := strings.Index(sticky[j:], "}")
+		if !strings.Contains(sticky[j:j+end], "background: var(--bg)") {
+			t.Errorf("%s に background 指定が無い（下のカードが透ける）", block)
+		}
+	}
+
+	// 流す側を誤って固定していないこと。
+	for _, must := range []string{".query-box", ".meta-list", ".paging"} {
+		j := strings.Index(sticky, must+" {")
+		if j < 0 {
+			continue
+		}
+		end := strings.Index(sticky[j:], "}")
+		if strings.Contains(sticky[j:j+end], "position: sticky") {
+			t.Errorf("%s は固定しない（ページングは金額付きリンクなので誤クリックを招く）", must)
+		}
+	}
+
+	// 絞り込みを開いたときに画面を埋め尽くさないよう、高さを制限して内部スクロールにする。
+	if !strings.Contains(sticky, "max-height: calc(100vh") || !strings.Contains(sticky, "overflow-y: auto") {
+		t.Error("固定した操作部は max-height + overflow-y で画面内に収める")
+	}
+}
+
 func TestFilterAccordion(t *testing.T) {
 	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	out := resultsHTML(t, app, "search_recent_edge.json")
@@ -1094,6 +1168,12 @@ func TestStyleSheetInvariants(t *testing.T) {
 		// ＋ / − を ::before で自前描画している。消えると開閉できることが分からなくなる。
 		".filter-details > summary::before",
 		".filter-details[open] > summary::before",
+		// 上部固定。--header-h / min-height / top の 3 つが揃っていないと、
+		// #list-controls がヘッダの下に潜るか、隙間が空いてカードが透ける。
+		"--header-h:",
+		"min-height: var(--header-h)",
+		"top: var(--header-h)",
+		"@media (min-width: 720px)",
 		"@media (max-width: 719px)",
 		"@media (max-width: 1039px)",
 		// 本文の改行は <br> 置換ではなく CSS で表現する（D-24）。
