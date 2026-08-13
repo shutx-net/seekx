@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -680,6 +681,46 @@ func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 // 成功時に計上されることも同時に固定する。
 // TestFilterAccordion は絞り込みがアコーディオンとして描画され、既定で閉じていることを
 // 確認する。件数表示とコスト注記は折りたたみの中、絞り込み中の件数バッジは summary 側。
+// TestColumnIcons は列数の切り替えがアイコンで描画され、ネイティブのラジオが
+// 残っていることを確認する。input を display: none で隠すとキーボードで操作できなくなる。
+func TestColumnIcons(t *testing.T) {
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
+	out := resultsHTML(t, app, "search_recent_edge.json")
+
+	// ラジオは 3 つとも残っている（見た目だけ変える）。
+	for _, v := range []string{"1", "2", "3"} {
+		if !strings.Contains(out, `<input type="radio" name="cols" value="`+v+`"`) {
+			t.Errorf("cols=%s のラジオが無い（ネイティブのラジオを残すこと）", v)
+		}
+	}
+	// 棒の本数が列数を表す。1 列 = 1 本、3 列 = 3 本。
+	for n, want := range map[int]string{
+		1: `<span class="cols-icon" aria-hidden="true"><span></span></span>`,
+		2: `<span class="cols-icon" aria-hidden="true"><span></span><span></span></span>`,
+		3: `<span class="cols-icon" aria-hidden="true"><span></span><span></span><span></span></span>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%d 列のアイコンの棒の本数が合っていない", n)
+		}
+	}
+	// アイコンだけでは何の選択肢か伝わらないので、読み上げ用のテキストを残す。
+	for _, v := range []string{"1 列", "2 列", "3 列"} {
+		if !strings.Contains(out, `<span class="sr-only">`+v+`</span>`) {
+			t.Errorf("%q の読み上げ用テキストが無い", v)
+		}
+	}
+	// 見出しは視覚的にも残す（数字を消したぶん、唯一の文字情報になる）。
+	if !strings.Contains(out, `<legend>表示列数</legend>`) {
+		t.Error("表示列数の見出しは視覚的に残す")
+	}
+	// 検索フォームと共用のクラスを列数側で使い回さない（変更が波及する）。
+	i := strings.Index(out, `<fieldset aria-describedby="cols-note">`)
+	end := strings.Index(out[i:], "</fieldset>")
+	if block := out[i : i+end]; strings.Contains(block, `class="radio"`) || strings.Contains(block, `class="checks"`) {
+		t.Error("列数の操作部で .checks / .radio を使わない（フォーム画面に波及する）")
+	}
+}
+
 // TestStickyHeader は上部固定の CSS が壊れていないことを確認する。
 // 固定するのはヘッダと一覧の操作部だけで、クエリ表示・メタ情報・ページングは流す。
 func TestStickyHeader(t *testing.T) {
@@ -751,6 +792,33 @@ func TestStickyHeader(t *testing.T) {
 	// 絞り込みを開いたときに画面を埋め尽くさないよう、高さを制限して内部スクロールにする。
 	if !strings.Contains(sticky, "max-height: calc(100vh") || !strings.Contains(sticky, "overflow-y: auto") {
 		t.Error("固定した操作部は max-height + overflow-y で画面内に収める")
+	}
+}
+
+// TestColumnRadioStaysFocusable は列数のラジオを隠す手段が
+// キーボード操作を壊していないことを確認する。
+func TestColumnRadioStaysFocusable(t *testing.T) {
+	b, err := staticFS.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("style.css を読めない: %v", err)
+	}
+	css := string(b)
+
+	i := strings.Index(css, ".cols-option input {")
+	if i < 0 {
+		t.Fatal(".cols-option input の規則が無い")
+	}
+	end := strings.Index(css[i:], "}")
+	block := css[i : i+end]
+
+	// opacity: 0 で隠す。display: none / visibility: hidden はフォーカスを奪う。
+	if !strings.Contains(block, "opacity: 0") {
+		t.Error("ラジオは opacity: 0 で隠す")
+	}
+	for _, bad := range []string{"display: none", "visibility: hidden"} {
+		if strings.Contains(block, bad) {
+			t.Errorf("%q でラジオを隠してはいけない（キーボードで操作できなくなる）", bad)
+		}
 	}
 }
 
@@ -1098,8 +1166,11 @@ func TestFilterDataAttributes(t *testing.T) {
 			t.Error(`data-f-media="6" が無い`)
 		}
 		// bool を直接出していない（P-TEMPLATE-BOOL）。
-		if strings.Contains(out, `="true"`) || strings.Contains(out, `="false"`) {
-			t.Error("bool をそのまま属性値に出してはいけない")
+		// {{.IsReply}} は "true" / "false" と描画され、JS 側では "false" も真になる。
+		// 対象は data 属性に限る。aria-hidden="true" のような正規の literal は問題ない
+		// （ページ全体から `="true"` を探すと、それらに誤反応する）。
+		if m := regexp.MustCompile(`data-[a-z-]+="(?:true|false)"`).FindString(out); m != "" {
+			t.Errorf("bool をそのまま data 属性に出してはいけない: %s", m)
 		}
 		// 初期状態でどのカードも隠れていない。
 		if strings.Contains(out, "post\" hidden") {
@@ -1174,6 +1245,11 @@ func TestStyleSheetInvariants(t *testing.T) {
 		"min-height: var(--header-h)",
 		"top: var(--header-h)",
 		"@media (min-width: 720px)",
+		// 列数アイコン。読み上げ用テキストと選択・フォーカス表示が揃っていること。
+		".sr-only",
+		".cols-icon",
+		".cols-option input:checked + .cols-icon",
+		".cols-option input:focus-visible + .cols-icon",
 		"@media (max-width: 719px)",
 		"@media (max-width: 1039px)",
 		// 本文の改行は <br> 置換ではなく CSS で表現する（D-24）。
