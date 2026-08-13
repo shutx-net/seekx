@@ -137,13 +137,52 @@ func clientOptions(cfg config.Config) xapi.Options {
 	}
 }
 
-func newRouter(app *App) *http.ServeMux {
+func newRouter(app *App) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", app.handleIndex)
 	mux.HandleFunc("GET /search", app.handleSearch)
 	mux.HandleFunc("GET /healthz", app.handleHealthz)
 	mux.Handle("GET /static/", app.staticHandler())
-	return mux
+	return withSecurityHeaders(mux)
+}
+
+// contentSecurityPolicy は script について厳格な CSP。
+//
+// 一次防御は html/template の文脈依存自動エスケープで、これは効いている
+// （template.HTML / template.JS / template.URL による迂回はコードベースに無い）。
+// CSP は多層防御で、守る対象は「将来の変更が API 由来の値を template.HTML に通して
+// エスケープを失う」経路。そのとき実行そのものを止める。
+//
+// style-src に 'unsafe-inline' が必要な理由: estimate.html のバー幅と _media.html の
+// aspect-ratio が項目ごとに変わる数値で、CSS クラスに追い出せない。nonce は <style>
+// 要素にしか効かず style 属性には適用されないため、ここは厳格にできない。
+// スタイル注入はスクリプト注入より影響が小さいので、この妥協は受け入れる。
+//
+// ホストは testdata/ の実レスポンスから確認した（画像 pbs.twimg.com / 動画 video.twimg.com）。
+// connect-src 'none' は JS が fetch / XHR / WebSocket を使わないことと一致する。
+const contentSecurityPolicy = "default-src 'none'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' https://pbs.twimg.com; " +
+	"media-src 'self' https://video.twimg.com; " +
+	"form-action 'self'; " +
+	"base-uri 'none'; " +
+	"frame-ancestors 'none'; " +
+	"connect-src 'none'"
+
+// withSecurityHeaders は全レスポンス（/static/ を含む）にセキュリティヘッダを付ける。
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		// nosniff を付けると、.js が正しい MIME タイプで配信されていない場合に
+		// ブラウザがスクリプトの実行を拒否する（P-NOSNIFF-JS）。
+		h.Set("X-Content-Type-Options", "nosniff")
+		// 既定の strict-origin-when-cross-origin でもクエリ文字列は送られないが、
+		// 既定に依存しないよう明示する。
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *App) staticHandler() http.Handler {
