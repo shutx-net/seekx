@@ -495,6 +495,68 @@ a.author-name:hover { text-decoration: underline; }
   color: var(--fg);
 }
 
+/* ---------- 絞り込みのアコーディオン ---------- */
+
+/* fieldset を <details> に置き換えたブロック。枠と余白はグローバルな fieldset に揃える。
+   既定は閉じた状態（テンプレート側で open を付けない）。 */
+.filter-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--gap) 0;
+}
+
+.filter-details[open] { padding-bottom: var(--gap); }
+
+/* summary は legend の代わりのラベル。閉じているときはこの 1 行だけになる。
+   注意: summary の既定は display: list-item で、開閉の三角形はそのリストマーカー。
+   バッジを横並びにするために display: flex を当てると【ネイティブのマーカーが消える】ので、
+   下の ::before で ＋ / − を自前で描く。display を変えるときは必ず両方セットで扱うこと。 */
+.filter-details > summary {
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  list-style: none; /* display を list-item に戻した場合の保険 */
+}
+
+.filter-details > summary::-webkit-details-marker { display: none; }
+
+/* 開閉を示すマーカー。＋ と − で幅が変わるとラベルが左右に動くので、
+   固定幅 + 中央寄せにして揺れを止める。
+   2 行目の "/ 読み上げ用の空文字" は生成内容の代替テキスト（未対応ブラウザは 1 行目が残る）。 */
+.filter-details > summary::before {
+  content: "＋";
+  content: "＋" / "";
+  flex: none;
+  width: 1.2em;
+  text-align: center;
+  color: var(--accent);
+}
+
+.filter-details[open] > summary::before {
+  content: "−";
+  content: "−" / "";
+}
+
+/* 絞り込みが効いているときだけ出る件数バッジ。JS が空文字を入れたら :empty で消える
+   （hidden 属性を付け外しせずに済むので、インライン JS の増分を 1 行に収められる）。 */
+.filter-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--ok-bg);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.filter-badge:empty { display: none; }
+
 /* ---------- メディアグリッド ---------- */
 
 .media-grid {
