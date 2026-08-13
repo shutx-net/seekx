@@ -209,6 +209,20 @@ select {
   margin: 0;
 }
 
+/* スクリーンリーダー専用テキスト。display: none / visibility: hidden は
+   読み上げからも消えるため使えない。 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .check input, .radio input { width: auto; margin: 0; }
 
 .actions {
@@ -461,6 +475,66 @@ a.author-name:hover { text-decoration: underline; }
   display: grid;
   gap: var(--gap);
   margin: 0 0 var(--gap);
+}
+
+/* ---------- 列数の切り替え（アイコン） ---------- */
+
+/* .checks / .radio は検索フォームと共用のクラスなので、ここでは使わずに専用クラスを持つ。
+   共用クラスを直接変えるとフォーム画面のチェックボックス群まで巻き添えになる。 */
+.cols-options {
+  display: flex;
+  gap: 6px;
+}
+
+.cols-option {
+  position: relative;
+  display: block;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* input は視覚的に隠すがフォーカスは受けられるようにする。
+   【display: none や visibility: hidden にするとキーボードで操作できなくなる。】 */
+.cols-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+}
+
+/* 棒の本数が列数を表す。中の span を flex で等分するだけなので、
+   外部アセットも SVG も要らない。 */
+.cols-icon {
+  display: flex;
+  gap: 2px;
+  width: 30px;
+  height: 22px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg-muted);
+}
+
+.cols-icon > span {
+  flex: 1;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.cols-option:hover .cols-icon { border-color: var(--accent); }
+
+.cols-option input:checked + .cols-icon {
+  border-color: var(--accent);
+  background: var(--ok-bg);
+  color: var(--accent);
+}
+
+/* input を隠しているため、フォーカスリングはアイコン側に出す。 */
+.cols-option input:focus-visible + .cols-icon {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ---------- 上部固定（スクロール中も見えるようにする） ---------- */

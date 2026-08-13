@@ -38,10 +38,26 @@
   <div class="list-controls" id="list-controls" hidden>
     <fieldset aria-describedby="cols-note">
       <legend>表示列数</legend>
-      <div class="checks">
-        <label class="radio"><input type="radio" name="cols" value="1" checked> 1 列</label>
-        <label class="radio"><input type="radio" name="cols" value="2"> 2 列</label>
-        <label class="radio"><input type="radio" name="cols" value="3"> 3 列</label>
+      {{/* ラジオ input は視覚的に隠すだけで DOM には残す。<button> 群に置き換えると
+           role="radiogroup" と矢印キー処理を自前で実装することになり、インライン JS の
+           行数上限（D-55）に収まらない。この形ならキーボード操作と読み上げはネイティブのまま。
+           アイコンの棒の本数が列数そのものを表す。 */}}
+      <div class="cols-options">
+        <label class="cols-option">
+          <input type="radio" name="cols" value="1" checked>
+          <span class="cols-icon" aria-hidden="true"><span></span></span>
+          <span class="sr-only">1 列</span>
+        </label>
+        <label class="cols-option">
+          <input type="radio" name="cols" value="2">
+          <span class="cols-icon" aria-hidden="true"><span></span><span></span></span>
+          <span class="sr-only">2 列</span>
+        </label>
+        <label class="cols-option">
+          <input type="radio" name="cols" value="3">
+          <span class="cols-icon" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span class="sr-only">3 列</span>
+        </label>
       </div>
       <p class="hint" id="cols-note">列数はこのブラウザに保存され、次回以降の検索結果にも適用されます。URL には含めないため、切り替えても再検索は発生しません。画面幅が狭いときは自動的に列数を減らします。</p>
     </fieldset>
