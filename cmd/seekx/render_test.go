@@ -721,6 +721,92 @@ func TestColumnIcons(t *testing.T) {
 	}
 }
 
+// TestSecurityHeaders は CSP とその周辺ヘッダが全レスポンスに付くことを確認する（#9）。
+func TestSecurityHeaders(t *testing.T) {
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
+	router := newRouter(app)
+
+	for _, path := range []string{"/", "/healthz", "/static/style.css", "/static/js/app.js"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d", rec.Code)
+			}
+			csp := rec.Header().Get("Content-Security-Policy")
+			if csp == "" {
+				t.Fatal("Content-Security-Policy が無い")
+			}
+			// script については厳格に保つ。ここが緩むと CSP の意味がほぼ失われる。
+			if strings.Contains(csp, "script-src 'self' 'unsafe-inline'") || strings.Contains(csp, "script-src 'unsafe-inline'") {
+				t.Error("script-src に 'unsafe-inline' を入れてはいけない")
+			}
+			for _, want := range []string{
+				"default-src 'none'", "script-src 'self'",
+				"img-src 'self' https://pbs.twimg.com",
+				"media-src 'self' https://video.twimg.com",
+				"connect-src 'none'", "base-uri 'none'", "frame-ancestors 'none'",
+			} {
+				if !strings.Contains(csp, want) {
+					t.Errorf("CSP に %q が無い", want)
+				}
+			}
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			if got := rec.Header().Get("Referrer-Policy"); got != "no-referrer" {
+				t.Errorf("Referrer-Policy = %q, want no-referrer", got)
+			}
+		})
+	}
+}
+
+// TestJavaScriptContentType は .js が正しい MIME タイプで配信されることを確認する。
+// nosniff を付けているため、ここを外すとブラウザがスクリプトの実行を拒否する
+// （P-NOSNIFF-JS）。「CSP を入れたら JS が動かない」という分かりにくい壊れ方をする。
+func TestJavaScriptContentType(t *testing.T) {
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
+	router := newRouter(app)
+
+	for _, path := range []string{"/static/js/boot.js", "/static/js/app.js"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status = %d", path, rec.Code)
+			continue
+		}
+		ct := rec.Header().Get("Content-Type")
+		if !strings.HasPrefix(ct, "text/javascript") && !strings.HasPrefix(ct, "application/javascript") {
+			t.Errorf("%s: Content-Type = %q（nosniff 下では実行されない）", path, ct)
+		}
+	}
+}
+
+// TestLayoutLoadsExternalScripts は boot.js が同期読み込みであることを確認する。
+// defer / async にすると最初のペイントに間に合わず、列数が 1 → N に切り替わる
+// ちらつきが出る（D-43）。
+func TestLayoutLoadsExternalScripts(t *testing.T) {
+	b, err := templatesFS.ReadFile("templates/layout.html")
+	if err != nil {
+		t.Fatalf("layout.html を読めない: %v", err)
+	}
+	html := string(b)
+
+	if !strings.Contains(html, `<script src="/static/js/boot.js"></script>`) {
+		t.Error("boot.js は属性なし（同期）で読み込む。defer / async は不可（D-43）")
+	}
+	if !strings.Contains(html, `<script src="/static/js/app.js"></script>`) {
+		t.Error("app.js が読み込まれていない")
+	}
+	// boot.js は </head> より前、app.js は </body> の直前。
+	if i, j := strings.Index(html, "boot.js"), strings.Index(html, "</head>"); i < 0 || j < 0 || i > j {
+		t.Error("boot.js は </head> より前に置く（最初のペイントより前に走らせる）")
+	}
+	if i, j := strings.Index(html, "app.js"), strings.Index(html, "</head>"); i >= 0 && j >= 0 && i < j {
+		t.Error("app.js は <head> に置かない（DOM 構築後に走らせる）")
+	}
+}
+
 // TestStickyHeader は上部固定の CSS が壊れていないことを確認する。
 // 固定するのはヘッダと一覧の操作部だけで、クエリ表示・メタ情報・ページングは流す。
 func TestStickyHeader(t *testing.T) {
@@ -805,9 +891,10 @@ func TestStickyHeader(t *testing.T) {
 // 上書きされることを確認する（#7）。固定値だとヘッダが折り返した時点で
 // 隙間が空くか、操作部がヘッダの下に潜る。
 func TestHeaderHeightIsMeasured(t *testing.T) {
-	b, err := templatesFS.ReadFile("templates/layout.html")
+	// JS は #9 で static/js/app.js に移した。
+	b, err := staticFS.ReadFile("static/js/app.js")
 	if err != nil {
-		t.Fatalf("layout.html を読めない: %v", err)
+		t.Fatalf("app.js を読めない: %v", err)
 	}
 	html := string(b)
 
@@ -1348,15 +1435,33 @@ func TestStyleSheetInvariants(t *testing.T) {
 
 // TestInlineScriptInvariants はインライン JS の不変条件と行数予算を固定する（D-35 / D-55）。
 func TestInlineScriptInvariants(t *testing.T) {
-	b, err := templatesFS.ReadFile("templates/layout.html")
+	// #9 でインライン JS を static/*.js に移した。計測対象も一緒に移してある。
+	// 上限を回避するための移動ではないので、予算と不変条件はそのまま引き継ぐ。
+	var sb strings.Builder
+	for _, name := range []string{"static/js/boot.js", "static/js/app.js"} {
+		b, err := staticFS.ReadFile(name)
+		if err != nil {
+			t.Fatalf("%s を読めない: %v", name, err)
+		}
+		sb.Write(b)
+	}
+	html := sb.String()
+
+	lb, err := templatesFS.ReadFile("templates/layout.html")
 	if err != nil {
 		t.Fatalf("layout.html を読めない: %v", err)
 	}
-	html := string(b)
+	layout := string(lb)
 
-	// 外部 JS を持ち込まない（D-35）。
-	if strings.Contains(html, "<script src") {
-		t.Error("<script src> を書いてはいけない（D-35）")
+	// テンプレートにインライン <script> を戻さない（CSP の script-src 'self' が効かなくなる）。
+	if strings.Contains(layout, "<script>") {
+		t.Error("インライン <script> を書いてはいけない（CSP: script-src 'self'）")
+	}
+	// 外部オリジンの JS を持ち込まない（D-35 の意図を維持）。src は /static/ 配下のみ。
+	for _, m := range regexp.MustCompile(`<script src="([^"]*)"`).FindAllStringSubmatch(layout, -1) {
+		if !strings.HasPrefix(m[1], "/static/") {
+			t.Errorf("script src は /static/ 配下のみ（D-35）: %q", m[1])
+		}
 	}
 	// ネットワークアクセスをしない。
 	for _, bad := range []string{"fetch(", "XMLHttpRequest", "WebSocket"} {
@@ -1412,7 +1517,7 @@ func TestInlineScriptInvariants(t *testing.T) {
 		t.Error("innerHTML を使ってはいけない")
 	}
 
-	// D-55: <script> ブロック内の総行数の上限。
+	// D-55: JS の総行数の上限。
 	//
 	// 90 → 100 に引き上げた（#7）。内訳は syncHeaderH の 5 行。
 	// 引き上げの理由: 固定した操作部の top に渡すヘッダ高さを 44px の固定値で
@@ -1421,24 +1526,11 @@ func TestInlineScriptInvariants(t *testing.T) {
 	//
 	// この上限は「クライアント側ロジックを最小に保つ」方針の代理指標であって、
 	// 数字自体に意味は無い。JS が正しい道具なら、CSS に押し込むのではなく
-	// ここを更新して理由を書くこと。逆に <script src> で外部ファイルへ逃がして
-	// 計測対象から外すのは方針の回避なので、上の D-35 の検査で塞いでいる。
-	lines := strings.Split(html, "\n")
-	inScript := false
-	count := 0
-	for _, ln := range lines {
-		if strings.Contains(ln, "<script>") {
-			inScript = true
-		}
-		if inScript {
-			count++
-		}
-		if strings.Contains(ln, "</script>") {
-			inScript = false
-		}
-	}
+	// ここを更新して理由を書くこと。#9 で外部ファイル化したが、計測対象を
+	// static/*.js に移しただけで予算は維持している（上限の回避ではない）。
+	count := strings.Count(html, "\n")
 	if count > 100 {
-		t.Errorf("<script> ブロックの行数 = %d, want <= 100（D-55）", count)
+		t.Errorf("JS の行数 = %d, want <= 100（D-55）", count)
 	}
-	t.Logf("インライン JS の行数: %d / 100", count)
+	t.Logf("JS の行数: %d / 100", count)
 }
