@@ -1,0 +1,43 @@
+{{template "top" .}}
+
+<h1>{{.Heading}}</h1>
+
+<div class="notice notice-error">
+  <p>{{.Message}}</p>
+</div>
+
+{{if .Steps}}
+<h2>対処手順</h2>
+<ol>{{range .Steps}}<li>{{.}}</li>{{end}}</ol>
+{{end}}
+
+{{if .ValidationErrors}}
+<h2>入力の問題</h2>
+<ul>{{range .ValidationErrors}}<li>{{.}}</li>{{end}}</ul>
+{{end}}
+
+{{if .Query}}
+<div class="query-box">
+  <strong>生成されたクエリ</strong>
+  <code>{{.Query}}</code>
+</div>
+{{end}}
+
+{{if or .Status .Detail .Messages}}
+<details class="ref">
+  <summary>技術的な詳細</summary>
+  <ul class="meta-list">
+    {{if .Status}}<li>HTTP ステータス: {{.Status}}</li>{{end}}
+    {{if .APITitle}}<li>title: {{.APITitle}}</li>{{end}}
+    {{if .Detail}}<li>detail: {{.Detail}}</li>{{end}}
+    {{if .Reason}}<li>reason: {{.Reason}}</li>{{end}}
+    {{range .Messages}}<li>{{.}}</li>{{end}}
+  </ul>
+</details>
+{{end}}
+
+<div class="actions">
+  <a class="btn secondary" href="{{.FormURL}}">フォームに戻る</a>
+</div>
+
+{{template "bottom" .}}

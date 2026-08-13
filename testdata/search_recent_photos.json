@@ -1,0 +1,231 @@
+{
+  "data": [
+    {
+      "id": "1900000000000000001",
+      "text": "画像1枚の投稿です。\n改行も含みます。",
+      "created_at": "2026-08-12T09:04:05.000Z",
+      "author_id": "10000001",
+      "conversation_id": "1900000000000000001",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000001"
+      ],
+      "attachments": {
+        "media_keys": [
+          "3_1000000000000000001"
+        ]
+      },
+      "public_metrics": {
+        "repost_count": 12,
+        "reply_count": 3,
+        "like_count": 145,
+        "quote_count": 1,
+        "bookmark_count": 8,
+        "impression_count": 20431
+      }
+    },
+    {
+      "id": "1900000000000000002",
+      "text": "画像2枚の投稿です。",
+      "created_at": "2026-08-12T08:30:00.000Z",
+      "author_id": "10000002",
+      "conversation_id": "1900000000000000002",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000002"
+      ],
+      "attachments": {
+        "media_keys": [
+          "3_1000000000000000002",
+          "3_1000000000000000003"
+        ]
+      },
+      "public_metrics": {
+        "repost_count": 0,
+        "reply_count": 0,
+        "like_count": 4,
+        "quote_count": 0,
+        "bookmark_count": 0,
+        "impression_count": 92
+      }
+    },
+    {
+      "id": "1900000000000000003",
+      "text": "画像3枚の投稿です。1枚目が左列で2行にまたがります。",
+      "created_at": "2026-08-12T07:15:30.000Z",
+      "author_id": "10000003",
+      "conversation_id": "1900000000000000003",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000003"
+      ],
+      "attachments": {
+        "media_keys": [
+          "3_1000000000000000004",
+          "3_1000000000000000005",
+          "3_1000000000000000006"
+        ]
+      },
+      "public_metrics": {
+        "repost_count": 55,
+        "reply_count": 12,
+        "like_count": 903,
+        "quote_count": 7,
+        "bookmark_count": 41,
+        "impression_count": 138204
+      }
+    },
+    {
+      "id": "1900000000000000004",
+      "text": "画像4枚の投稿です。投稿者は includes.users に存在しません（削除・凍結・非公開アカウントの想定）。",
+      "created_at": "2026-08-12T06:00:00.000Z",
+      "author_id": "10000099",
+      "conversation_id": "1900000000000000004",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000004"
+      ],
+      "attachments": {
+        "media_keys": [
+          "3_1000000000000000007",
+          "3_1000000000000000008",
+          "3_1000000000000000009",
+          "3_1000000000000000010"
+        ]
+      },
+      "public_metrics": {
+        "repost_count": 2,
+        "reply_count": 1,
+        "like_count": 30,
+        "quote_count": 0,
+        "bookmark_count": 2,
+        "impression_count": 1520
+      }
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "10000001",
+        "name": "サンプル 太郎",
+        "username": "sample_taro",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000001/abcdefg_normal.jpg",
+        "verified": false,
+        "verified_type": "none"
+      },
+      {
+        "id": "10000002",
+        "name": "Sample Hanako",
+        "username": "sample_hanako",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000002/hijklmn_normal.png",
+        "verified": true,
+        "verified_type": "blue"
+      },
+      {
+        "id": "10000003",
+        "name": "テスト機関",
+        "username": "test_org",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000003/opqrstu_normal.jpg",
+        "verified": true,
+        "verified_type": "business"
+      }
+    ],
+    "media": [
+      {
+        "media_key": "3_1000000000000000001",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/AAAAAAAAAAAAAAA.jpg",
+        "preview_image_url": null,
+        "width": 1200,
+        "height": 675,
+        "alt_text": "青空と雲の写真"
+      },
+      {
+        "media_key": "3_1000000000000000002",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/BBBBBBBBBBBBBBB.jpg",
+        "preview_image_url": null,
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "media_key": "3_1000000000000000003",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/CCCCCCCCCCCCCCC.jpg",
+        "preview_image_url": null,
+        "width": 800,
+        "height": 1200
+      },
+      {
+        "media_key": "3_1000000000000000004",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/DDDDDDDDDDDDDDD.jpg",
+        "preview_image_url": null,
+        "width": 1600,
+        "height": 900
+      },
+      {
+        "media_key": "3_1000000000000000005",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/EEEEEEEEEEEEEEE.jpg",
+        "preview_image_url": null,
+        "width": 900,
+        "height": 900
+      },
+      {
+        "media_key": "3_1000000000000000006",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/FFFFFFFFFFFFFFF.jpg",
+        "preview_image_url": null,
+        "width": 900,
+        "height": 1600
+      },
+      {
+        "media_key": "3_1000000000000000007",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/GGGGGGGGGGGGGGG.jpg",
+        "preview_image_url": null,
+        "width": 1200,
+        "height": 1200
+      },
+      {
+        "media_key": "3_1000000000000000008",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/HHHHHHHHHHHHHHH.jpg",
+        "preview_image_url": null,
+        "width": 1200,
+        "height": 1200
+      },
+      {
+        "media_key": "3_1000000000000000009",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/IIIIIIIIIIIIIII.jpg",
+        "preview_image_url": null,
+        "width": 1200,
+        "height": 1200
+      },
+      {
+        "media_key": "3_1000000000000000010",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/JJJJJJJJJJJJJJJ.jpg",
+        "preview_image_url": null,
+        "width": 1200,
+        "height": 1200
+      }
+    ]
+  },
+  "meta": {
+    "newest_id": "1900000000000000001",
+    "oldest_id": "1900000000000000004",
+    "result_count": 4,
+    "next_token": "b26v89c19zqg8o3fpds7wxyz0000000000000000"
+  }
+}

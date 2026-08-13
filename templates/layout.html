@@ -1,0 +1,126 @@
+{{define "top" -}}
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{{.Title}} | seekx</title>
+<link rel="stylesheet" href="/static/style.css">
+<script>
+// 列数を最初のペイントより前に <html data-cols> へ反映する（D-43 / P-FOUC-COLS）。
+(function () {
+  try {
+    var c = window.localStorage.getItem("seekx.cols");
+    if (c === "2" || c === "3") document.documentElement.setAttribute("data-cols", c);
+  } catch (e) { /* 使えない構成では既定の 1 列（P-LS-THROW） */ }
+})();
+</script>
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/">seekx</a>
+  <div class="header-meta">
+    {{if .FixtureMode}}<span class="badge badge-fixture">フィクスチャモード（課金 0）</span>{{end}}
+    <span class="badge" title="このプロセスを起動してからの推定コスト">セッション {{usd .SessionUSD}} / {{.SessionCalls}} 回</span>
+    {{if .Cap.Known}}<span class="badge" title="月次 post read cap の消費状況（毎月 {{.Cap.ResetDay}} 日リセット）">月次 cap {{num .Cap.Usage}} / {{num .Cap.Cap}}（{{pct .Cap.Percent}}）</span>{{end}}
+  </div>
+</header>
+{{if .Cap.IsWarn}}
+<div class="banner banner-warn">月次上限の {{pct .Cap.Percent}} を消費しています（{{num .Cap.Usage}} / {{num .Cap.Cap}} post reads）。リセットは毎月 {{.Cap.ResetDay}} 日です。</div>
+{{end}}
+{{if .Cap.IsBlock}}
+<div class="banner banner-block">月次上限の {{pct .Cap.Percent}} を消費しています（{{num .Cap.Usage}} / {{num .Cap.Cap}} post reads）。検索の実行は停止されます。リセットは毎月 {{.Cap.ResetDay}} 日です。どうしても続行する場合は SEEKX_ALLOW_OVER_CAP=1 を設定して再起動してください。</div>
+{{end}}
+<main>
+{{- end}}
+
+{{define "bottom" -}}
+</main>
+<footer class="site-footer">
+  <p>seekx — ローカル専用の X（旧 Twitter）投稿検索ツール。表示している投稿・画像・動画の権利は各投稿者および X に帰属します。</p>
+  <p>取得データは永続化しません（プロセスメモリのみ）。表示は {{.TZ}} 基準です。</p>
+  <p>検索は従量課金です（投稿 1 件 $0.005 / counts 1 リクエスト $0.005〜）。ページの再読み込みは再検索になります。</p>
+</footer>
+<script>
+// <dialog> の開閉のみ。フレームワーク・外部 JS は使わない（D-04）。
+document.addEventListener("click", function (ev) {
+  var t = ev.target.closest ? ev.target.closest("[data-dialog]") : null;
+  if (!t) return;
+  var d = document.getElementById(t.getAttribute("data-dialog"));
+  if (d && typeof d.showModal === "function") {
+    ev.preventDefault();
+    d.showModal();
+  }
+});
+// 一覧の列数（保存・適用）と、取得済みカードの絞り込み。ネットワークアクセスは無い。
+(function () {
+  var list = document.getElementById("post-list"), controls = document.getElementById("list-controls");
+  if (!list || !controls) { // 一覧が無いページで --max の拡張だけが効くのを防ぐ（P-COLS-LEAK）
+    document.documentElement.removeAttribute("data-cols");
+    return;
+  }
+  var cards = list.querySelectorAll(".post"); // DOM は変化しないので 1 度だけ取得（A-15）
+  var countEl = document.getElementById("filter-count"), emptyEl = document.getElementById("filter-empty");
+  var flagBoxes = [["f-no-reply", "reply"], ["f-no-repost", "repost"], ["f-no-quote", "quote"],
+    ["f-no-sensitive", "sensitive"], ["f-no-link", "link"]];
+  var timer = null;
+  controls.removeAttribute("hidden"); // JS が動かない環境では見せない（D-52）
+  // ---- 列数（D-40 / D-42）。属性 1 つの付け外しだけで DOM は作り直さない（AC-09）----
+  function applyCols(v) {
+    if (v === "2" || v === "3") document.documentElement.setAttribute("data-cols", v);
+    else document.documentElement.removeAttribute("data-cols");
+    try { window.localStorage.setItem("seekx.cols", v); } catch (e) { /* P-LS-THROW */ }
+  }
+  var radios = controls.querySelectorAll("input[name='cols']");
+  var current = document.documentElement.getAttribute("data-cols") || "1";
+  for (var i = 0; i < radios.length; i++) radios[i].checked = (radios[i].value === current);
+  // ---- 絞り込み。取得済みの DOM だけを見る（API は呼ばない）----
+  function numOf(id) { // 空欄・解釈不能は null にして比較自体を行わない（P-NUMBER-EMPTY）
+    var el = document.getElementById(id);
+    var n = el && el.value !== "" ? parseInt(el.value, 10) : NaN;
+    return isNaN(n) ? null : n;
+  }
+  function on(id) { var el = document.getElementById(id); return !!(el && el.checked); }
+  function apply() {
+    var minR = numOf("f-runes-min"), maxR = numOf("f-runes-max"), minM = numOf("f-media-min"), minL = numOf("f-likes-min");
+    var excl = [], shown = 0;
+    for (var j = 0; j < flagBoxes.length; j++) if (on(flagBoxes[j][0])) excl.push(" " + flagBoxes[j][1] + " ");
+    for (var i = 0; i < cards.length; i++) {
+      var c = cards[i], ok = true;
+      var runes = +c.getAttribute("data-f-runes"), media = +c.getAttribute("data-f-media"), likes = +c.getAttribute("data-f-likes");
+      var flags = " " + (c.getAttribute("data-f-flags") || "") + " ";
+      if (minR !== null && runes < minR) ok = false;
+      if (maxR !== null && runes > maxR) ok = false;
+      if (minM !== null && media < minM) ok = false;
+      if (minL !== null && (likes < 0 || likes < minL)) ok = false; // -1 は不明（D-49）
+      for (var k = 0; k < excl.length; k++) if (flags.indexOf(excl[k]) >= 0) ok = false;
+      if (ok) { c.removeAttribute("hidden"); shown++; continue; }
+      var d = c.querySelector("dialog[open]"); // 開いたまま隠すと操作不能になり得る（P-DIALOG-HIDDEN）
+      if (d) d.close();
+      c.setAttribute("hidden", "");
+    }
+    countEl.textContent = shown + " / " + cards.length + " 件表示中";
+    if (shown === 0) emptyEl.removeAttribute("hidden");
+    else emptyEl.setAttribute("hidden", "");
+  }
+  function schedule() { clearTimeout(timer); timer = setTimeout(apply, 150); } // 読み上げ対策（D-53 / AC-05）
+  function onEdit(ev) {
+    if (ev.target.name !== "cols") schedule();
+    else if (ev.type === "input") applyCols(ev.target.value); // change では二重に適用しない
+  }
+  controls.addEventListener("input", onEdit);
+  controls.addEventListener("change", onEdit);
+  document.getElementById("filter-reset").addEventListener("click", function () {
+    var nums = controls.querySelectorAll("input[type='number']");
+    var boxes = controls.querySelectorAll("input[type='checkbox']");
+    for (var i = 0; i < nums.length; i++) nums[i].value = "";
+    for (var j = 0; j < boxes.length; j++) boxes[j].checked = false;
+    apply();
+  });
+  // 初期化時に apply() は呼ばない。サーバが描画した全件表示・「M / M 件表示中」が既に正しい。
+})();
+</script>
+</body>
+</html>
+{{- end}}

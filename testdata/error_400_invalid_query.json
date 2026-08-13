@@ -1,0 +1,13 @@
+{
+  "errors": [
+    {
+      "parameters": {
+        "query": ["has:images lang:ja"]
+      },
+      "message": "There were errors processing your request: no viable alternative at input 'has:images lang:ja' (at line 1, column 1)"
+    }
+  ],
+  "title": "Invalid Request",
+  "detail": "One or more parameters to your request was invalid.",
+  "type": "https://api.twitter.com/2/problems/invalid-request"
+}

@@ -1,0 +1,656 @@
+/* seekx — 全スタイル。外部フォント・外部画像・@import は使わない。 */
+
+:root {
+  --bg: #ffffff;
+  --bg-soft: #f7f9f9;
+  --fg: #0f1419;
+  --fg-muted: #536471;
+  --border: #cfd9de;
+  --border-soft: #eff3f4;
+  --accent: #1d9bf0;
+  --accent-fg: #ffffff;
+  --warn-bg: #fff8e1;
+  --warn-fg: #7a5c00;
+  --warn-border: #f0c000;
+  --danger-bg: #fdecec;
+  --danger-fg: #a01b1b;
+  --danger-border: #e0736f;
+  --ok-bg: #e8f5fe;
+  --radius: 12px;
+  --gap: 12px;
+  --max: 680px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15181c;
+    --bg-soft: #1e2227;
+    --fg: #e7e9ea;
+    --fg-muted: #8b98a5;
+    --border: #38444d;
+    --border-soft: #2a3138;
+    --accent: #1d9bf0;
+    --accent-fg: #ffffff;
+    --warn-bg: #3a3006;
+    --warn-fg: #f5d76e;
+    --warn-border: #7a6300;
+    --danger-bg: #3a1414;
+    --danger-fg: #f5a3a3;
+    --danger-border: #7a2222;
+    --ok-bg: #10293a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", Meiryo, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+a { color: var(--accent); }
+a:hover { text-decoration: underline; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+main {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: var(--gap);
+}
+
+/* ---------- ヘッダ / フッタ ---------- */
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px var(--gap);
+  align-items: baseline;
+  justify-content: space-between;
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: var(--gap) var(--gap) 0;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 18px;
+  text-decoration: none;
+  color: var(--fg);
+}
+
+.header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.badge-fixture {
+  background: var(--ok-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.site-footer {
+  max-width: var(--max);
+  margin: 24px auto 40px;
+  padding: var(--gap);
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.site-footer p { margin: 4px 0; }
+
+/* ---------- バナー / 注意 ---------- */
+
+.banner {
+  max-width: var(--max);
+  margin: var(--gap) auto 0;
+  padding: 10px var(--gap);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.banner-warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+.banner-block { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-border); }
+
+.notice {
+  margin: 0 0 var(--gap);
+  padding: 10px var(--gap);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  font-size: 13px;
+}
+
+.notice-warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+.notice-error { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-border); }
+.notice ul { margin: 4px 0 0; padding-left: 1.2em; }
+
+h1 { font-size: 20px; margin: var(--gap) 0; }
+h2 { font-size: 16px; margin: 20px 0 8px; }
+
+.hint { font-size: 12px; color: var(--fg-muted); margin: 2px 0 0; }
+
+/* ---------- フォーム ---------- */
+
+form { margin: 0; }
+
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap);
+  margin: 0 0 var(--gap);
+}
+
+legend { font-weight: 700; font-size: 13px; padding: 0 6px; }
+
+.field { margin-bottom: 10px; }
+.field:last-child { margin-bottom: 0; }
+
+label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+
+input[type="text"],
+input[type="number"],
+input[type="datetime-local"],
+select {
+  width: 100%;
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+
+.check, .radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 400;
+  margin: 0;
+}
+
+.check input, .radio input { width: auto; margin: 0; }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: var(--gap);
+}
+
+button, .btn {
+  display: inline-block;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button.secondary, .btn.secondary {
+  background: transparent;
+  color: var(--accent);
+}
+
+.btn[aria-disabled="true"], button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.btn:hover, button:hover { text-decoration: none; filter: brightness(1.05); }
+
+/* ---------- クエリ表示 ---------- */
+
+.query-box {
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 10px var(--gap);
+  margin: 0 0 var(--gap);
+}
+
+.query-box code {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.meta-list {
+  list-style: none;
+  margin: var(--gap) 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.meta-list li { margin: 2px 0; }
+.meta-list .strong { color: var(--fg); font-weight: 700; }
+
+/* ---------- 見積りのバーチャート（CSS のみ） ---------- */
+
+.buckets { margin: var(--gap) 0; }
+
+.bucket {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) 1fr minmax(56px, auto);
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  margin: 3px 0;
+}
+
+.bucket-track {
+  background: var(--border-soft);
+  border-radius: 4px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.bucket-bar {
+  background: var(--accent);
+  height: 100%;
+  min-width: 1px;
+}
+
+.bucket-count { text-align: right; color: var(--fg-muted); }
+
+/* ---------- 投稿カード ---------- */
+
+.post {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: var(--gap);
+  margin: 0 0 var(--gap);
+  background: var(--bg);
+}
+
+.post-head {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--border-soft);
+  object-fit: cover;
+}
+
+.avatar-missing {
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  color: var(--fg-muted);
+}
+
+.author { min-width: 0; }
+
+.author-name {
+  font-weight: 700;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.author-handle { color: var(--fg-muted); text-decoration: none; font-size: 13px; }
+.author-handle:hover { text-decoration: underline; }
+
+.verified { color: var(--accent); font-size: 12px; }
+
+.post-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+
+.flag {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+/* X 公式ロゴ（static/x-logo.svg）は白抜き版のため、ブランドガイドラインに沿って
+   黒地の上に置く。ロゴ資産そのものは一切改変しない（D-33）。 */
+.x-logo {
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: #000;
+  flex: none;
+}
+
+.x-logo img {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.post-text {
+  white-space: pre-wrap;
+  margin: 10px 0;
+  font-size: 15px;
+}
+
+.post-time-row { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.post-time { font-size: 12px; color: var(--fg-muted); text-decoration: none; }
+.post-time:hover { text-decoration: underline; }
+.post-view-on-x { font-size: 12px; text-decoration: none; }
+.post-view-on-x:hover { text-decoration: underline; }
+
+a.author-name { color: var(--fg); text-decoration: none; }
+a.author-name:hover { text-decoration: underline; }
+
+.metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.post-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+}
+
+/* ---------- 検索結果一覧（列数切り替え） ---------- */
+
+.post-list {
+  display: grid;
+  gap: var(--gap);
+  /* 1fr は minmax(auto, 1fr) の略で最小値が min-content になる。長い URL やメディアが
+     トラックを押し広げて横スクロールを生むため、必ず minmax(0, 1fr) を使う（D-38）。 */
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+/* .post は単独配置前提の margin-bottom を持つ。grid gap と二重になるので打ち消す。
+   min-width: 0 はトラック側の minmax(0, ...) と対になる保険。 */
+.post-list > .post {
+  margin: 0;
+  min-width: 0;
+}
+
+:root[data-cols="2"] .post-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+:root[data-cols="3"] .post-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* 2 列以上では本文カラム幅 680px では狭すぎる。--max は main / .site-header /
+   .banner / .site-footer が共有する単一情報源なので、これを上書きして
+   ページ全体の幅を揃えて広げる（D-42）。width ではなく max-width の上書きなので
+   狭い画面では自動的に無効になり、横スクロールを生まない。 */
+:root[data-cols="2"] { --max: 1000px; }
+:root[data-cols="3"] { --max: 1320px; }
+
+/* 狭い画面では保存済みの選択を尊重したまま描画上の列数だけを減らす（D-44）。
+   コントロールを disabled にはしない。 */
+@media (max-width: 1039px) {
+  :root[data-cols="3"] .post-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 719px) {
+  :root[data-cols="2"] .post-list,
+  :root[data-cols="3"] .post-list { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* hidden 属性の保険。UA スタイルの display: none は作者スタイルに負けるため、
+   将来 .post に display 系の指定が入っても絞り込みが無言で壊れないようにする（D-51）。 */
+[hidden] { display: none !important; }
+
+/* ---------- 一覧コントロール（列数・絞り込み） ---------- */
+
+.list-controls {
+  display: grid;
+  gap: var(--gap);
+  margin: 0 0 var(--gap);
+}
+
+/* fieldset のグローバル既定（padding: var(--gap) / margin: 0 0 var(--gap)）は
+   このブロックでは間延びする。gap で間隔を持つので margin は 0 にする。 */
+.list-controls fieldset {
+  margin: 0;
+  padding: 8px var(--gap) var(--gap);
+}
+
+/* input[type="number"] のグローバル既定は width: 100%。4 桁の数値に全幅は不要。 */
+.list-controls input[type="number"] {
+  width: 7em;
+  max-width: 100%;
+}
+
+/* button のグローバル既定（padding: 9px 16px / font-size: 14px / font-weight: 700）は
+   このブロックでは大きすぎるので詰める。border-radius: 999px（ピル形）は
+   .btn.secondary と見た目を揃えるため意図的に継承したまま残す。
+   .media-grid .cell で border-radius を打ち消したのは overflow: hidden で画像が
+   円形に切り抜かれるという別の事情による（P-CTRL-CASCADE）。 */
+.list-controls button {
+  padding: 4px 14px;
+  font-size: 13px;
+}
+
+.list-controls .actions { margin-top: 10px; }
+
+.filter-count {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+/* ---------- メディアグリッド ---------- */
+
+.media-grid {
+  display: grid;
+  gap: 2px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 10px 0;
+  background: var(--border-soft);
+}
+
+.media-grid .cell {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  /* 写真セルは <button> なので `button, .btn` の border-radius: 999px を継ぐ。
+     .cell は overflow: hidden なので、打ち消さないと画像が円形に切り抜かれる。
+     外周の角丸は .media-grid 側が持つ。 */
+  border-radius: 0;
+  background: none;
+  overflow: hidden;
+  display: block;
+  width: 100%;
+  cursor: zoom-in;
+}
+
+.media-grid img, .media-grid video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+}
+
+.grid-1 { grid-template-columns: 1fr; }
+.grid-1 img, .grid-1 video {
+  max-height: 70vh;
+  height: auto;
+  object-fit: contain;
+  background: #000;
+}
+
+.grid-2 { grid-template-columns: 1fr 1fr; }
+.grid-2 .cell { aspect-ratio: 1 / 1; }
+.grid-2 img { object-fit: cover; }
+
+.grid-3 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  aspect-ratio: 16 / 9;
+}
+.grid-3 > :first-child { grid-row: span 2; }
+.grid-3 img { object-fit: cover; }
+
+.grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.grid-4 .cell { aspect-ratio: 1 / 1; }
+.grid-4 img { object-fit: cover; }
+
+.duration, .overflow {
+  position: absolute;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 0 6px;
+}
+
+.duration { right: 6px; bottom: 6px; }
+
+.overflow {
+  inset: 0;
+  border-radius: 0;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0;
+}
+
+.playback-note {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin: 4px 0 0;
+}
+
+.sensitive {
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  padding: 8px var(--gap);
+  margin: 10px 0;
+}
+
+.sensitive summary { cursor: pointer; font-size: 13px; }
+.sensitive[open] summary { margin-bottom: 8px; }
+
+/* ---------- dialog（画像拡大） ---------- */
+
+dialog {
+  max-width: min(96vw, 1200px);
+  max-height: 92vh;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  overflow: auto;
+}
+
+dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
+
+dialog img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.dialog-close {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+}
+
+/* ---------- ページング ---------- */
+
+.paging {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  margin: 20px 0;
+}
+
+/* ---------- 演算子リファレンス ---------- */
+
+.ops { font-size: 12px; color: var(--fg-muted); }
+.ops table { border-collapse: collapse; width: 100%; }
+.ops td { padding: 2px 6px 2px 0; vertical-align: top; }
+.ops code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+.scroll-x { overflow-x: auto; }
+
+details.ref { margin: var(--gap) 0; font-size: 13px; }
+details.ref summary { cursor: pointer; font-weight: 600; }
+
+@media (max-width: 480px) {
+  .post-head { grid-template-columns: 40px 1fr auto; }
+  .avatar { width: 40px; height: 40px; }
+}

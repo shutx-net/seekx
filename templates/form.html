@@ -1,0 +1,193 @@
+{{template "top" .}}
+
+<h1>投稿を検索する</h1>
+
+{{if .Errors}}
+<div class="notice notice-error">
+  <strong>検索できません（API は呼び出していません）</strong>
+  <ul>{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
+
+{{if .Warnings}}
+<div class="notice notice-warn">
+  <ul>{{range .Warnings}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
+
+<form action="/search" method="get">
+  <fieldset>
+    <legend>キーワード</legend>
+    <div class="field">
+      <label for="kw">キーワード</label>
+      <input type="text" id="kw" name="kw" value="{{.Form.Keywords}}"
+        placeholder="例: 猫  /  (猫 OR 犬) -うさぎ">
+      <p class="hint">演算子・括弧・OR をそのまま書けます（大文字の OR のみ論理和）。</p>
+    </div>
+    <div class="field">
+      <label for="phrase">完全一致フレーズ</label>
+      <input type="text" id="phrase" name="phrase" value="{{.Form.ExactPhrase}}" placeholder="例: 機械学習 入門">
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="or">いずれかを含む（OR）</label>
+        <input type="text" id="or" name="or" value="{{.Form.OrWords}}" placeholder="空白区切り: 猫 犬">
+      </div>
+      <div class="field">
+        <label for="exclude">除外する語</label>
+        <input type="text" id="exclude" name="exclude" value="{{.Form.ExcludeWords}}" placeholder="空白区切り: 速報 号外">
+      </div>
+    </div>
+    <div class="field">
+      <label for="hashtag">ハッシュタグ</label>
+      <input type="text" id="hashtag" name="hashtag" value="{{.Form.Hashtag}}" placeholder="# は自動で付きます">
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>アカウント</legend>
+    <div class="grid2">
+      <div class="field">
+        <label for="from">このアカウントの投稿（from:）</label>
+        <input type="text" id="from" name="from" value="{{.Form.FromUser}}" placeholder="nasa">
+      </div>
+      <div class="field">
+        <label for="to">このアカウントへの返信（to:）</label>
+        <input type="text" id="to" name="to" value="{{.Form.ToUser}}" placeholder="nasa">
+      </div>
+      <div class="field">
+        <label for="mention">このアカウントへのメンション（@）</label>
+        <input type="text" id="mention" name="mention" value="{{.Form.MentionUser}}" placeholder="nasa">
+      </div>
+      <div class="field">
+        <label for="retweets_of">このアカウントのリポスト（retweets_of:）</label>
+        <input type="text" id="retweets_of" name="retweets_of" value="{{.Form.RetweetsOf}}" placeholder="nasa">
+        <p class="hint">指定すると -is:retweet を自動付与しません。</p>
+      </div>
+      <div class="field">
+        <label for="list">リスト ID（list:）</label>
+        <input type="text" id="list" name="list" value="{{.Form.ListID}}" placeholder="123456">
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>リプライ</legend>
+    <div class="field">
+      <div class="checks" role="group" aria-describedby="conj-note-reply">
+        <label class="radio"><input type="radio" name="reply" value=""{{if eq .Form.ReplyMode ""}} checked{{end}}> 指定なし</label>
+        <label class="radio"><input type="radio" name="reply" value="only"{{if eq .Form.ReplyMode "only"}} checked{{end}}> 返信のみ（is:reply）</label>
+        <label class="radio"><input type="radio" name="reply" value="exclude"{{if eq .Form.ReplyMode "exclude"}} checked{{end}}> 返信を除く（-is:reply）</label>
+      </div>
+      <p class="hint" id="conj-note-reply">この条件だけでは検索できません（キーワードやアカウントを 1 つ以上指定してください）。</p>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="conv">スレッド ID（conversation_id:）</label>
+        <input type="text" id="conv" name="conv" value="{{.Form.ConversationID}}" placeholder="数字のみ">
+      </div>
+      <div class="field">
+        <label for="in_reply_to">この投稿への返信（投稿 ID）</label>
+        <input type="text" id="in_reply_to" name="in_reply_to" value="{{.Form.InReplyToPostID}}" placeholder="数字のみ">
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>メディア・言語</legend>
+    <div class="field">
+      <div class="checks" role="group" aria-describedby="conj-note-media">
+        <label class="check"><input type="checkbox" name="images" value="1"{{if .Form.HasImages}} checked{{end}}> 画像付き（has:images）</label>
+        <label class="check"><input type="checkbox" name="video" value="1"{{if .Form.HasVideo}} checked{{end}}> 動画付き（has:video_link）</label>
+        <label class="check"><input type="checkbox" name="media" value="1"{{if .Form.HasMedia}} checked{{end}}> メディア付き（has:media）</label>
+        <label class="check"><input type="checkbox" name="links" value="1"{{if .Form.HasLinks}} checked{{end}}> リンク付き（has:links）</label>
+      </div>
+      <p class="hint" id="conj-note-media">これらの条件だけでは検索できません（X API の仕様）。キーワードかアカウントを併せて指定してください。</p>
+    </div>
+    <div class="field">
+      <label for="lang">言語（lang:）</label>
+      <select id="lang" name="lang" aria-describedby="conj-note-lang">
+        {{range .LangOptions}}
+        <option value="{{.Value}}"{{if eq $.Form.Lang .Value}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+      <p class="hint" id="conj-note-lang">言語だけでは検索できません。既定は「指定なし」です。</p>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>反応数・リポスト</legend>
+    <div class="grid2">
+      <div class="field">
+        <label for="min_likes">いいね数の下限（min_likes:）</label>
+        <input type="number" id="min_likes" name="min_likes" min="0" value="{{.Form.MinLikes}}">
+      </div>
+      <div class="field">
+        <label for="min_replies">返信数の下限（min_replies:）</label>
+        <input type="number" id="min_replies" name="min_replies" min="0" value="{{.Form.MinReplies}}">
+      </div>
+      <div class="field">
+        <label for="min_reposts">リポスト数の下限（min_reposts:）</label>
+        <input type="number" id="min_reposts" name="min_reposts" min="0" value="{{.Form.MinReposts}}">
+      </div>
+    </div>
+    <div class="field">
+      <label class="check"><input type="checkbox" name="include_reposts" value="1"{{if .Form.IncludeReposts}} checked{{end}}> リポストを含める</label>
+      <p class="hint">OFF 推奨：ON にすると結果の大半がリポストになります（既定では -is:retweet を付与します）。</p>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>期間・範囲・件数</legend>
+    <div class="grid2">
+      <div class="field">
+        <label for="start">開始日時（{{.TZ}}）</label>
+        <input type="datetime-local" id="start" name="start" value="{{.Form.StartLocal}}">
+      </div>
+      <div class="field">
+        <label for="end">終了日時（{{.TZ}}）</label>
+        <input type="datetime-local" id="end" name="end" value="{{.Form.EndLocal}}">
+        <p class="hint">現在時刻の 30 秒前に自動調整されます。</p>
+      </div>
+    </div>
+    <div class="field">
+      <label>検索範囲</label>
+      <div class="checks">
+        <label class="radio"><input type="radio" name="endpoint" value="recent"{{if ne .Form.Endpoint "all"}} checked{{end}}> 直近7日（recent）</label>
+        <label class="radio"><input type="radio" name="endpoint" value="all"{{if eq .Form.Endpoint "all"}} checked{{end}}> 全期間（2006年3月以降）</label>
+      </div>
+      <p class="hint">全期間は 1 リクエスト/秒のペーシングが入り、遡及範囲が広いぶん条件を絞らないと高コストになります。</p>
+    </div>
+    <div class="field">
+      <label for="max">取得件数</label>
+      <select id="max" name="max">
+        {{range .MaxOptions}}
+        <option value="{{.Value}}"{{if eq $.Form.MaxResults .Value}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit" name="mode" value="estimate">件数を見積る（{{usd .CountsCost}}）</button>
+    <button type="submit" name="mode" value="execute" class="secondary">見積りなしで検索する（最大 {{usd2 .MaxCost}}）</button>
+  </div>
+  <p class="hint">まず max_results=10 で条件を確かめ、良い条件が見つかってから件数を増やすと安く済みます。</p>
+</form>
+
+<details class="ref">
+  <summary>検索演算子リファレンス（単独で使えるか）</summary>
+  <div class="ops scroll-x">
+    <h2>単独で使える（standalone）</h2>
+    <table>
+      {{range .StandaloneOps}}<tr><td><code>{{.Operator}}</code></td><td><code>{{.Example}}</code></td><td>{{.JP}}</td></tr>{{end}}
+    </table>
+    <h2>単独では使えない（conjunction-required）</h2>
+    <table>
+      {{range .ConjunctionOps}}<tr><td><code>{{.Operator}}</code></td><td>{{.JP}}</td></tr>{{end}}
+    </table>
+    <p class="hint">conjunction-required の演算子だけを指定すると X API は HTTP 400 を返します（課金はされません）。seekx は送信前に弾きます。</p>
+  </div>
+</details>
+
+{{template "bottom" .}}

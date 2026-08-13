@@ -1,0 +1,56 @@
+{{if .Media}}
+  {{if .Sensitive}}
+  <details class="sensitive">
+    <summary>センシティブな内容が含まれる可能性があります（クリックして表示）</summary>
+    {{template "mediagrid" .}}
+  </details>
+  {{else}}
+  {{template "mediagrid" .}}
+  {{end}}
+{{end}}
+
+{{define "mediagrid" -}}
+<div class="media-grid {{.GridClass}}">
+  {{range $i, $m := .GridMedia}}
+    {{if eq $m.Kind "photo"}}
+      <button type="button" class="cell" data-dialog="{{$m.DialogID}}" title="拡大表示"
+        {{- if and (eq $.GridClass "grid-1") $m.AspectRatioCSS}} style="aspect-ratio:{{$m.AspectRatioCSS}}"{{end}}>
+        <img src="{{$m.ThumbURL}}" alt="{{$m.Alt}}"
+          {{if $m.Width}}width="{{$m.Width}}"{{end}}{{if $m.Height}} height="{{$m.Height}}"{{end}}
+          loading="lazy" decoding="async">
+        {{if and (eq $i 3) (gt $.OverflowCount 0)}}<span class="overflow" data-dialog="dlg-all-{{$.ID}}">+{{$.OverflowCount}}</span>{{end}}
+      </button>
+    {{else if eq $m.Kind "video"}}
+      <div class="cell">
+        {{if $m.VideoURL}}
+        <video controls preload="none" poster="{{$m.PosterURL}}"
+          {{if $m.Width}}width="{{$m.Width}}"{{end}}{{if $m.Height}} height="{{$m.Height}}"{{end}} playsinline>
+          <source src="{{$m.VideoURL}}" type="video/mp4">
+          お使いのブラウザは動画再生に対応していません。<a href="{{$.PermalinkURL}}" rel="noreferrer">X で表示</a>
+        </video>
+        {{if $m.Duration}}<span class="duration">{{$m.Duration}}</span>{{end}}
+        {{else}}
+        <img src="{{$m.PosterURL}}" alt="{{$m.Alt}}" loading="lazy" decoding="async">
+        {{end}}
+      </div>
+    {{else if eq $m.Kind "gif"}}
+      <div class="cell">
+        {{if $m.VideoURL}}
+        <video autoplay loop muted playsinline preload="metadata" poster="{{$m.PosterURL}}"
+          {{if $m.Width}}width="{{$m.Width}}"{{end}}{{if $m.Height}} height="{{$m.Height}}"{{end}}>
+          <source src="{{$m.VideoURL}}" type="video/mp4">
+        </video>
+        <span class="duration">GIF</span>
+        {{else}}
+        <img src="{{$m.PosterURL}}" alt="{{$m.Alt}}" loading="lazy" decoding="async">
+        {{end}}
+      </div>
+    {{end}}
+  {{end}}
+</div>
+{{range .GridMedia}}
+  {{if .PlaybackNote}}
+  <p class="playback-note">{{.PlaybackNote}}<a href="{{$.PermalinkURL}}" rel="noreferrer">X で再生する</a></p>
+  {{end}}
+{{end}}
+{{- end}}

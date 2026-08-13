@@ -1,0 +1,67 @@
+{{template "top" .}}
+
+<h1>見積り</h1>
+
+{{if .Warnings}}
+<div class="notice notice-warn">
+  <ul>{{range .Warnings}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
+
+<div class="query-box">
+  <strong>生成されたクエリ</strong>
+  <code>{{.Query}}</code>
+  <p class="hint">
+    <span class="strong">{{.QueryRunes}} 文字</span> / 上限 {{.QueryLimit}} 文字（上限判定は文字数で行います）。
+    参考: {{.QueryBytes}} バイト。
+  </p>
+</div>
+
+<ul class="meta-list">
+  <li>検索範囲: <span class="strong">{{.EndpointName}}</span></li>
+  <li>期間: <span class="strong">{{.StartDisplay}} 〜 {{.EndDisplay}}</span>（{{.TZ}}）{{if .RangeUTC}}<br>UTC: {{.RangeUTC}}{{end}}</li>
+  <li>該当件数（counts）: <span class="strong">{{num .Total}} 件</span>（粒度 {{.Granularity}}）</li>
+  <li>今回取得する件数: <span class="strong">{{num .Est.WillFetch}} 件</span> = min(該当件数, 取得件数 {{.MaxResults}})</li>
+  <li>予想コスト: <span class="strong">{{usd .Est.TotalMinUSD}}</span>（投稿 {{num .Est.WillFetch}} 件 × $0.005）〜 <span class="strong">{{usd .Est.TotalMaxUSD}}</span>（最大）</li>
+  <li>この見積り自体のコスト: {{usd .CountsCost}}（counts 1 リクエスト・すでに発生しています）</li>
+  {{if .Cap.Known}}<li>月次 cap: {{num .Cap.Usage}} / {{num .Cap.Cap}}（{{pct .Cap.Percent}}・リセットは毎月 {{.Cap.ResetDay}} 日）</li>{{end}}
+  <li>セッション累計: {{usd .SessionUSD}}（{{.SessionCalls}} 回）</li>
+</ul>
+
+<p class="hint">
+  最大値は「取得する全投稿が別々のユーザーで、かつ user read（$0.010/user）も課金される」最悪ケースの推定です。
+  user read が実際に課金されるかは未確認のため、上限として併記しています。
+</p>
+
+{{if .Buckets}}
+<h2>時系列（{{.Granularity}}）</h2>
+<div class="buckets">
+  {{range .Buckets}}
+  <div class="bucket">
+    <span>{{.Label}}</span>
+    <span class="bucket-track"><span class="bucket-bar" style="width:{{printf "%.1f" .Pct}}%"></span></span>
+    <span class="bucket-count">{{num .Count}}</span>
+  </div>
+  {{end}}
+</div>
+<p class="hint">件数が多い期間に絞ってから取得すると、同じコストでより濃い結果が得られます。</p>
+{{end}}
+
+{{if not .Allowed}}
+<div class="notice notice-error">
+  <strong>実行できません</strong>
+  <p>{{.GateReason}}</p>
+</div>
+{{end}}
+
+<div class="actions">
+  {{if .Allowed}}
+  <a class="btn" href="{{.ExecuteURL}}">この条件で検索する（{{usd .Est.TotalMinUSD}}〜{{usd .Est.TotalMaxUSD}}）</a>
+  {{else}}
+  <span class="btn" aria-disabled="true">この条件で検索する（実行不可）</span>
+  {{end}}
+  <a class="btn secondary" href="{{.FormURL}}">条件を修正する</a>
+  <a class="btn secondary" href="{{.ReestimateURL}}">再見積り（+{{usd .CountsCost}}）</a>
+</div>
+
+{{template "bottom" .}}

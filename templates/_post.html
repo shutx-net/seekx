@@ -1,0 +1,90 @@
+<article class="post"
+  data-f-runes="{{.FilterTextRunes}}"
+  data-f-media="{{.FilterMediaCount}}"
+  data-f-likes="{{.FilterLikes}}"
+  data-f-flags="{{.FilterFlags}}">
+  <div class="post-head">
+    {{/* 表示要件: プロフィール画像・表示名・@username はいずれもプロフィールへリンクする。
+         アバターは表示名と @username の左に置く。 */}}
+    {{if .Author.ProfileImageURL}}
+      {{if .Author.ProfileURL}}
+      <a href="{{.Author.ProfileURL}}" rel="noreferrer" aria-label="{{.Author.Name}} のプロフィール"><img class="avatar" src="{{.Author.ProfileImageURL}}" alt="{{.Author.Name}} のプロフィール画像" width="48" height="48" loading="lazy" decoding="async"></a>
+      {{else}}
+      <img class="avatar" src="{{.Author.ProfileImageURL}}" alt="{{.Author.Name}} のプロフィール画像" width="48" height="48" loading="lazy" decoding="async">
+      {{end}}
+    {{else}}
+    <div class="avatar avatar-missing" aria-hidden="true">?</div>
+    {{end}}
+
+    <div class="author">
+      <div>
+        {{if .Author.ProfileURL}}
+        <a class="author-name" href="{{.Author.ProfileURL}}" rel="noreferrer">{{.Author.Name}}</a>
+        {{else}}
+        <span class="author-name">{{.Author.Name}}</span>
+        {{end}}
+        {{if .Author.Verified}}<span class="verified" title="認証済み{{if .Author.VerifiedType}}（{{.Author.VerifiedType}}）{{end}}">✔</span>{{end}}
+      </div>
+      {{if .Author.ProfileURL}}
+      <a class="author-handle" href="{{.Author.ProfileURL}}" rel="noreferrer">@{{.Author.Username}}</a>
+      {{else}}
+      <span class="author-handle">@{{.Author.Username}}</span>
+      {{end}}
+      {{if .Author.Missing}}<p class="hint">（削除済み・非公開アカウントの可能性）</p>{{end}}
+      {{if or .IsReply .IsRepost .IsQuote}}
+      <div class="post-flags">
+        {{if .IsReply}}<span class="flag">返信</span>{{end}}
+        {{if .IsRepost}}<span class="flag">リポスト</span>{{end}}
+        {{if .IsQuote}}<span class="flag">引用</span>{{end}}
+      </div>
+      {{end}}
+    </div>
+
+    <a class="x-logo" href="{{.PermalinkURL}}" title="X で表示" rel="noreferrer">
+      <img src="/static/x-logo.svg" alt="X" width="16" height="16">
+    </a>
+  </div>
+
+  <div class="post-text">{{.Text}}</div>
+
+  {{template "_media.html" .}}
+
+  <div class="post-foot">
+    <span class="post-time-row">
+      {{if .CreatedAtISO}}
+      <a class="post-time" href="{{.PermalinkURL}}" rel="noreferrer"><time datetime="{{.CreatedAtISO}}">{{.CreatedAtDisplay}}</time></a>
+      {{else}}<span class="post-time">日時不明</span>{{end}}
+      {{/* 表示要件: 返信・リポスト・いいねのアクションを実装しない場合は、
+           タイムスタンプの隣に「X で表示」を置いて恒久リンクへ導く。 */}}
+      <a class="post-view-on-x" href="{{.PermalinkURL}}" rel="noreferrer">X で表示</a>
+    </span>
+    {{if .Lang}}<span class="flag">{{.Lang}}</span>{{end}}
+  </div>
+
+  {{if .Metrics.HasMetrics}}
+  <div class="metrics">
+    <span>返信 {{num .Metrics.Replies}}</span>
+    <span>リポスト {{num .Metrics.Reposts}}</span>
+    <span>いいね {{num .Metrics.Likes}}</span>
+    <span>引用 {{num .Metrics.Quotes}}</span>
+    <span>ブックマーク {{num .Metrics.Bookmarks}}</span>
+    <span>表示 {{num .Metrics.Impressions}}</span>
+  </div>
+  {{end}}
+
+  {{range $i, $m := .Media}}
+    {{if $m.FullURL}}
+    <dialog id="{{$m.DialogID}}">
+      <div class="dialog-close"><form method="dialog"><button type="submit" class="secondary">閉じる</button></form></div>
+      <img src="{{$m.FullURL}}" alt="{{$m.Alt}}">
+    </dialog>
+    {{end}}
+  {{end}}
+
+  {{if gt .OverflowCount 0}}
+  <dialog id="dlg-all-{{.ID}}">
+    <div class="dialog-close"><form method="dialog"><button type="submit" class="secondary">閉じる</button></form></div>
+    {{range .Media}}{{if .FullURL}}<img src="{{.FullURL}}" alt="{{.Alt}}">{{end}}{{end}}
+  </dialog>
+  {{end}}
+</article>

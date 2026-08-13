@@ -1,0 +1,265 @@
+{
+  "data": [
+    {
+      "id": "1900000000000000201",
+      "text": "センシティブな内容を含む可能性がある投稿です。",
+      "created_at": "2026-08-12T11:00:00.000Z",
+      "author_id": "10000001",
+      "conversation_id": "1900000000000000201",
+      "lang": "ja",
+      "possibly_sensitive": true,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000201"
+      ],
+      "attachments": {
+        "media_keys": [
+          "3_1000000000000000201"
+        ]
+      },
+      "public_metrics": {
+        "retweet_count": 3,
+        "reply_count": 1,
+        "like_count": 22,
+        "quote_count": 0,
+        "bookmark_count": 0,
+        "impression_count": 800
+      }
+    },
+    {
+      "id": "1900000000000000202",
+      "text": "これは 280 文字を超える長文投稿の切り詰められた本文です。ここで途中で切れま…",
+      "created_at": "2026-08-12T10:45:00.000Z",
+      "author_id": "10000002",
+      "conversation_id": "1900000000000000202",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000202"
+      ],
+      "note_post": {
+        "text": "これは 280 文字を超える長文投稿の全文です。note_post.text には切り詰められていない本文が入ります。表示要件（本文全文の表示）を満たすためには、text ではなくこちらを使わなければなりません。この行が最後まで表示されていれば note_post が優先されていることの証拠になります。"
+      },
+      "public_metrics": {
+        "repost_count": 8,
+        "reply_count": 2,
+        "like_count": 64,
+        "quote_count": 1,
+        "bookmark_count": 12,
+        "impression_count": 4210
+      }
+    },
+    {
+      "id": "1900000000000000203",
+      "text": "public_metrics と attachments が欠落した投稿です。",
+      "created_at": "2026-08-12T10:30:00.000Z",
+      "author_id": "10000003",
+      "conversation_id": "1900000000000000203",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000203"
+      ]
+    },
+    {
+      "id": "1900000000000000204",
+      "text": "RT @sample_taro: リポスト形式の投稿です。",
+      "created_at": "2026-08-12T10:20:00.000Z",
+      "author_id": "10000002",
+      "conversation_id": "1900000000000000204",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000204"
+      ],
+      "referenced_posts": [
+        {
+          "type": "retweeted",
+          "id": "1900000000000000001"
+        }
+      ]
+    },
+    {
+      "id": "1900000000000000205",
+      "text": "引用と返信の両方のフラグが立つ投稿です。",
+      "created_at": "2026-08-12T10:10:00.000Z",
+      "author_id": "10000003",
+      "conversation_id": "1900000000000000001",
+      "in_reply_to_user_id": "10000001",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000205"
+      ],
+      "referenced_posts": [
+        {
+          "type": "replied_to",
+          "id": "1900000000000000001"
+        },
+        {
+          "type": "quoted",
+          "id": "1900000000000000002"
+        }
+      ]
+    },
+    {
+      "id": "1900000000000000206",
+      "text": "<script>alert('xss')</script> & \"引用符\" と <b>タグ</b>\n改行\nと絵文字 🐈 を含む投稿です。",
+      "created_at": "2026-08-12T10:00:00.000Z",
+      "author_id": "10000001",
+      "conversation_id": "1900000000000000206",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000206"
+      ],
+      "public_metrics": {
+        "repost_count": 0,
+        "reply_count": 0,
+        "like_count": 0,
+        "quote_count": 0,
+        "bookmark_count": 0,
+        "impression_count": 0
+      }
+    },
+    {
+      "id": "1900000000000000207",
+      "text": "画像 6 枚（4 枚描画 + 2 枚オーバーフロー）の投稿です。1 枚は media が欠落しています。",
+      "created_at": "2026-08-12T09:50:00.000Z",
+      "author_id": "10000001",
+      "conversation_id": "1900000000000000207",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000207"
+      ],
+      "attachments": {
+        "media_keys": [
+          "3_1000000000000000211",
+          "3_1000000000000000212",
+          "3_1000000000000000213",
+          "3_1000000000000000214",
+          "3_1000000000000000215",
+          "3_1000000000000000216",
+          "3_1000000000000000299"
+        ]
+      }
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "10000001",
+        "name": "サンプル 太郎",
+        "username": "sample_taro",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000001/abcdefg_normal.jpg",
+        "verified": false,
+        "verified_type": "none"
+      },
+      {
+        "id": "10000002",
+        "name": "Sample Hanako",
+        "username": "sample_hanako",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000002/hijklmn_normal.png",
+        "verified": true,
+        "verified_type": "blue"
+      },
+      {
+        "id": "10000003",
+        "name": "テスト機関",
+        "username": "test_org",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000003/opqrstu_normal.jpg",
+        "verified": true,
+        "verified_type": "government"
+      }
+    ],
+    "media": [
+      {
+        "media_key": "3_1000000000000000201",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/SENSITIVE0000000.jpg",
+        "preview_image_url": null,
+        "width": 1200,
+        "height": 800
+      },
+      {
+        "media_key": "3_1000000000000000211",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/OVER00000000001.jpg",
+        "preview_image_url": null,
+        "width": 1000,
+        "height": 1000
+      },
+      {
+        "media_key": "3_1000000000000000212",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/OVER00000000002.jpg",
+        "preview_image_url": null,
+        "width": 1000,
+        "height": 1000
+      },
+      {
+        "media_key": "3_1000000000000000213",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/OVER00000000003.jpg",
+        "preview_image_url": null,
+        "width": 1000,
+        "height": 1000
+      },
+      {
+        "media_key": "3_1000000000000000214",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/OVER00000000004.jpg",
+        "preview_image_url": null,
+        "width": 1000,
+        "height": 1000
+      },
+      {
+        "media_key": "3_1000000000000000215",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/OVER00000000005.jpg",
+        "preview_image_url": null,
+        "width": 1000,
+        "height": 1000
+      },
+      {
+        "media_key": "3_1000000000000000216",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/OVER00000000006.jpg",
+        "preview_image_url": null,
+        "width": 1000,
+        "height": 1000
+      }
+    ],
+    "posts": [
+      {
+        "id": "1900000000000000001",
+        "text": "画像1枚の投稿です。",
+        "author_id": "10000001",
+        "edit_history_post_ids": [
+          "1900000000000000001"
+        ]
+      },
+      {
+        "id": "1900000000000000002",
+        "text": "画像2枚の投稿です。",
+        "author_id": "10000002",
+        "edit_history_post_ids": [
+          "1900000000000000002"
+        ]
+      }
+    ]
+  },
+  "meta": {
+    "newest_id": "1900000000000000201",
+    "oldest_id": "1900000000000000207",
+    "result_count": 7,
+    "previous_token": "prev26v89c19zqg8o3fpds7wxyz00000000000"
+  }
+}

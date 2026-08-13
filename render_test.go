@@ -1,0 +1,1097 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+)
+
+func testApp(t *testing.T, cfg Config) *App {
+	t.Helper()
+	if cfg.APIBaseURL == "" {
+		cfg.APIBaseURL = "http://127.0.0.1:1/unused-in-tests"
+	}
+	if cfg.DisplayTZ == "" {
+		cfg.DisplayTZ = "Asia/Tokyo"
+	}
+	if cfg.MaxResultsCap == 0 {
+		cfg.MaxResultsCap = 100
+	}
+	if cfg.SessionBudgetUSD == 0 {
+		cfg.SessionBudgetUSD = 5.0
+	}
+	log := discardLogger()
+	return &App{
+		cfg:     cfg,
+		client:  NewClient(cfg, log),
+		tmpl:    tmpl,
+		log:     log,
+		session: &SessionSpend{},
+		loc:     cfg.Location(),
+		now:     func() time.Time { return time.Date(2026, 8, 13, 9, 0, 0, 0, cfg.Location()) },
+	}
+}
+
+func sampleViewResult(t *testing.T, fixture string) ViewResult {
+	t.Helper()
+	var resp SearchResponse
+	loadFixture(t, fixture, &resp)
+	loc := jst(t)
+	v := BuildView(&resp, ViewOptions{
+		Now:        time.Date(2026, 8, 13, 9, 0, 0, 0, loc),
+		Loc:        loc,
+		Cap:        CapStatus{Usage: 42, Cap: 2000000, Ratio: 0.000021, Known: true, ResetDay: 12},
+		RateLimit:  &RateLimit{Limit: 450, Remaining: 449, Reset: time.Unix(1786000000, 0)},
+		SpentUSD:   0.05,
+		SessionUSD: 0.055,
+	})
+	v.QueryString = "猫 has:images lang:ja -is:retweet"
+	v.QueryRunes, v.QueryBytes = QueryLength(v.QueryString)
+	v.QueryLimit = QueryLimitRecent
+	v.EndpointName = "直近7日"
+	v.MaxResults = 10
+	v.StartDisplay = "2026-08-06 00:00"
+	v.EndDisplay = "2026-08-13 09:00"
+	return v
+}
+
+// TestRenderTemplates は全テンプレートを代表的なデータで描画し、エラーが出ないことを確認する。
+func TestRenderTemplates(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+	cap := CapStatus{Usage: 42, Cap: 2000000, Known: true, ResetDay: 12}
+
+	t.Run("form.html", func(t *testing.T) {
+		p := FormPage{
+			Page:           app.page("検索", cap, EndpointRecent),
+			Form:           SearchForm{MaxResults: 10, Endpoint: "recent"},
+			MaxOptions:     maxOptionsFor(100),
+			LangOptions:    langOptions,
+			MaxCost:        0.05,
+			StandaloneOps:  StandaloneOperators,
+			ConjunctionOps: ConjunctionRequiredOperators,
+		}
+		out := mustRender(t, app, "form.html", p)
+		for _, want := range []string{
+			`name="kw"`, `name="phrase"`, `name="or"`, `name="exclude"`, `name="hashtag"`,
+			`name="from"`, `name="to"`, `name="mention"`, `name="retweets_of"`, `name="list"`,
+			`name="reply"`, `name="conv"`, `name="in_reply_to"`,
+			`name="images"`, `name="video"`, `name="media"`, `name="links"`, `name="lang"`,
+			`name="min_likes"`, `name="min_replies"`, `name="min_reposts"`, `name="include_reposts"`,
+			`name="start"`, `name="end"`, `name="endpoint"`, `name="max"`,
+			`value="estimate"`, `value="execute"`,
+			"has:images", "フィクスチャモード",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("form.html に %q が含まれていない", want)
+			}
+		}
+		// 全コントロールに <label for> が付いている（サンプル確認）。
+		for _, id := range []string{"kw", "phrase", "or", "exclude", "hashtag", "from", "lang", "max", "start", "end"} {
+			if !strings.Contains(out, `for="`+id+`"`) {
+				t.Errorf("label for=%q がない", id)
+			}
+		}
+	})
+
+	t.Run("form.html（エラー・警告表示）", func(t *testing.T) {
+		p := FormPage{
+			Page:        app.page("検索", cap, EndpointRecent),
+			Form:        SearchForm{HasImages: true, MaxResults: 10, Endpoint: "recent"},
+			Errors:      []string{"[V01] 画像付きだけでは検索できません。"},
+			Warnings:    []string{"[V07] 終了日時を調整しました。"},
+			MaxOptions:  maxOptionsFor(100),
+			LangOptions: langOptions,
+		}
+		out := mustRender(t, app, "form.html", p)
+		if !strings.Contains(out, "V01") || !strings.Contains(out, "V07") {
+			t.Error("エラー・警告が表示されていない")
+		}
+	})
+
+	t.Run("estimate.html", func(t *testing.T) {
+		var counts CountsResponse
+		loadFixture(t, "counts_recent.json", &counts)
+		est := EstimateSearch(counts.Meta.TotalPostCount, 10)
+		est.Granularity = "day"
+		p := EstimatePage{
+			Page:          app.page("見積り", cap, EndpointRecent),
+			Form:          SearchForm{Keywords: "猫", MaxResults: 10, Endpoint: "recent"},
+			Query:         "猫 has:images lang:ja -is:retweet",
+			QueryLimit:    QueryLimitRecent,
+			EndpointName:  "直近7日",
+			StartDisplay:  "2026-08-06 00:00",
+			EndDisplay:    "2026-08-13 09:00",
+			RangeUTC:      "2026-08-05T15:00:00Z 〜 2026-08-13T00:00:00Z",
+			Granularity:   "day",
+			Total:         counts.Meta.TotalPostCount,
+			MaxResults:    10,
+			Est:           est,
+			Buckets:       bucketViews(counts.Data, jst(t), "day"),
+			Warnings:      []string{"終了日時を調整しました。"},
+			Allowed:       true,
+			ExecuteURL:    "/search?kw=%E7%8C%AB&mode=execute",
+			ReestimateURL: "/search?kw=%E7%8C%AB&mode=estimate",
+			FormURL:       "/?kw=%E7%8C%AB",
+		}
+		p.QueryRunes, p.QueryBytes = QueryLength(p.Query)
+		out := mustRender(t, app, "estimate.html", p)
+		for _, want := range []string{"10,000", "この条件で検索する", "文字", "バイト", "bucket-bar"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("estimate.html に %q が含まれていない", want)
+			}
+		}
+		if strings.Contains(out, "ZgotmplZ") {
+			t.Error("テンプレートが値を安全でないと判断した（ZgotmplZ）")
+		}
+	})
+
+	t.Run("estimate.html（ゲートで実行不可）", func(t *testing.T) {
+		p := EstimatePage{
+			Page:       app.page("見積り", CapStatus{Usage: 1960000, Cap: 2000000, Ratio: 0.98, Level: CapBlock, Known: true, ResetDay: 12}, EndpointRecent),
+			Query:      "猫",
+			QueryLimit: QueryLimitRecent,
+			Est:        EstimateSearch(100, 10),
+			Allowed:    false,
+			GateReason: "月次上限の 98.0% を消費しているため実行を停止しました。",
+			FormURL:    "/",
+		}
+		out := mustRender(t, app, "estimate.html", p)
+		if !strings.Contains(out, `aria-disabled="true"`) {
+			t.Error("実行ボタンが無効化されていない")
+		}
+		if !strings.Contains(out, "実行を停止") {
+			t.Error("理由が表示されていない")
+		}
+		if !strings.Contains(out, "banner-block") {
+			t.Error("cap 超過バナーが出ていない")
+		}
+	})
+
+	t.Run("results.html（画像・動画・エッジを含む）", func(t *testing.T) {
+		for _, fixture := range []string{
+			"search_recent.json", "search_recent_photos.json",
+			"search_recent_video.json", "search_recent_edge.json",
+			"search_recent_partial_errors.json",
+		} {
+			v := sampleViewResult(t, fixture)
+			p := ResultsPage{
+				Page:           app.page("検索結果", cap, EndpointRecent),
+				Result:         v,
+				NextURL:        "/search?kw=x&mode=execute&token=abc",
+				NextCost:       0.05,
+				FormURL:        "/?kw=x",
+				EstimateURL:    "/search?kw=x&mode=estimate",
+				EmptyHints:     emptyHints(SearchForm{}),
+				RateLimitReset: "12:34:56",
+			}
+			out := mustRender(t, app, "results.html", p)
+			if strings.Contains(out, "ZgotmplZ") {
+				t.Errorf("%s: ZgotmplZ が出力された", fixture)
+			}
+			if !strings.Contains(out, "次の") {
+				t.Errorf("%s: ページングリンクがない", fixture)
+			}
+		}
+	})
+
+	t.Run("results.html（0 件）", func(t *testing.T) {
+		v := sampleViewResult(t, "search_recent_empty.json")
+		p := ResultsPage{
+			Page:       app.page("検索結果", cap, EndpointRecent),
+			Result:     v,
+			FormURL:    "/",
+			EmptyHints: emptyHints(SearchForm{Lang: "ja", HasImages: true}),
+		}
+		out := mustRender(t, app, "results.html", p)
+		if !strings.Contains(out, "0 件でした") {
+			t.Error("0 件のメッセージがない")
+		}
+		if !strings.Contains(out, "lang:ja") {
+			t.Error("緩和ヒントがない")
+		}
+	})
+
+	t.Run("results.html（ページングがゲートで無効）", func(t *testing.T) {
+		v := sampleViewResult(t, "search_recent_photos.json")
+		p := ResultsPage{
+			Page:          app.page("検索結果", cap, EndpointRecent),
+			Result:        v,
+			NextURL:       "/search?mode=execute&token=abc",
+			PagingBlocked: true,
+			PagingReason:  "セッション予算を超えました。",
+			FormURL:       "/",
+		}
+		out := mustRender(t, app, "results.html", p)
+		if !strings.Contains(out, `aria-disabled="true"`) {
+			t.Error("ページングリンクが無効化されていない")
+		}
+		if strings.Contains(out, `href="/search?mode=execute&amp;token=abc"`) {
+			t.Error("無効化時にリンクを出してはいけない")
+		}
+	})
+
+	t.Run("error.html（全 ErrorKind）", func(t *testing.T) {
+		kinds := []ErrorKind{
+			KindInvalidQuery, KindUnauthorized, KindForbiddenNotEnrolled, KindForbidden,
+			KindNotFound, KindRateLimited, KindServer, KindNetwork, KindDecode, KindUsageCap,
+		}
+		for _, k := range kinds {
+			ae := &APIError{Kind: k, Status: 400, Title: "Invalid Request", Detail: "詳細", Reason: "client-not-enrolled",
+				Messages: []string{"errors[].message の内容"}}
+			p := ErrorPage{
+				Page:     app.page("エラー", cap, EndpointRecent),
+				Heading:  k.Title(),
+				Message:  ae.UserMessage(jst(t)),
+				Steps:    errorSteps(k),
+				Status:   ae.Status,
+				APITitle: ae.Title,
+				Detail:   ae.Detail,
+				Reason:   ae.Reason,
+				Messages: ae.Messages,
+				Query:    "猫 has:images",
+				FormURL:  "/",
+			}
+			out := mustRender(t, app, "error.html", p)
+			if !strings.Contains(out, k.Title()) {
+				t.Errorf("%v: 見出しがない", k)
+			}
+			if !strings.Contains(out, "フォームに戻る") {
+				t.Errorf("%v: 戻るリンクがない", k)
+			}
+		}
+	})
+}
+
+func mustRender(t *testing.T, app *App, name string, data any) string {
+	t.Helper()
+	var sb strings.Builder
+	if err := app.tmpl.ExecuteTemplate(&sb, name, data); err != nil {
+		t.Fatalf("%s の描画に失敗: %v", name, err)
+	}
+	out := sb.String()
+	if out == "" {
+		t.Fatalf("%s の出力が空", name)
+	}
+	if !strings.Contains(out, "<!doctype html>") {
+		t.Errorf("%s: レイアウトが適用されていない", name)
+	}
+	return out
+}
+
+// TestNoRawHTML は本文の HTML がエスケープされることを確認する（D-24 / P-TEMPLATE-TEXT）。
+func TestNoRawHTML(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+	v := sampleViewResult(t, "search_recent_edge.json")
+
+	found := false
+	for _, p := range v.Posts {
+		if strings.Contains(p.Text, "<script>") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("フィクスチャに <script> を含む投稿が必要")
+	}
+
+	out := mustRender(t, app, "results.html", ResultsPage{
+		Page:    app.page("検索結果", CapStatus{}, EndpointRecent),
+		Result:  v,
+		FormURL: "/",
+	})
+	if strings.Contains(out, "<script>alert") {
+		t.Error("本文の <script> がエスケープされていない（XSS）")
+	}
+	if !strings.Contains(out, "&lt;script&gt;alert") {
+		t.Error("エスケープされた本文が見つからない")
+	}
+	// <br> 置換をしていないこと（改行は CSS の pre-wrap で表現する）。
+	if strings.Contains(out, "改行<br>") {
+		t.Error("本文を <br> に置換してはいけない")
+	}
+	if !strings.Contains(out, "white-space") == false {
+		_ = out // style.css 側の責務
+	}
+}
+
+// TestDisplayRequirementsPresence は表示要件の必須要素が出力に含まれることを確認する。
+func TestDisplayRequirementsPresence(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+	v := sampleViewResult(t, "search_recent_photos.json")
+	out := mustRender(t, app, "results.html", ResultsPage{
+		Page:    app.page("検索結果", CapStatus{}, EndpointRecent),
+		Result:  v,
+		FormURL: "/",
+	})
+
+	checks := map[string]string{
+		"C-01 表示名":       `class="author-name"`,
+		"C-02 @username": `class="author-handle"`,
+		"C-03 プロフィール画像":  `class="avatar"`,
+		"C-04 本文":        `class="post-text"`,
+		"C-05 X ロゴ":      `/static/x-logo.svg`,
+		"C-07 恒久リンク":     `https://x.com/sample_taro/status/1900000000000000001`,
+	}
+	for label, want := range checks {
+		if !strings.Contains(out, want) {
+			t.Errorf("%s: %q が出力に含まれていない", label, want)
+		}
+	}
+	// 投稿者不明でもカードを描画し、プレースホルダを出す。
+	if !strings.Contains(out, unknownAuthorName) {
+		t.Error("投稿者不明のプレースホルダが出ていない")
+	}
+	if !strings.Contains(out, "削除済み・非公開アカウントの可能性") {
+		t.Error("投稿者不明の説明が出ていない")
+	}
+	// X ロゴは投稿カード内（作者情報の近傍）にある。
+	firstPost := strings.Index(out, `class="post"`)
+	logo := strings.Index(out, "/static/x-logo.svg")
+	firstText := strings.Index(out, `class="post-text"`)
+	if !(firstPost < logo && logo < firstText) {
+		t.Error("X ロゴが投稿カードのヘッダ位置にない")
+	}
+}
+
+// TestHandlersFixtureMode はフィクスチャモードで全画面を一巡できることを確認する（API 呼び出し 0 回）。
+func TestHandlersFixtureMode(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+	router := newRouter(app)
+
+	get := func(t *testing.T, target string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("GET / でフォームが出る", func(t *testing.T) {
+		rec := get(t, "/")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: %d", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), `action="/search"`) {
+			t.Error("フォームがない")
+		}
+	})
+
+	t.Run("GET /healthz", func(t *testing.T) {
+		rec := get(t, "/healthz")
+		if rec.Code != http.StatusOK || rec.Body.String() != "ok" {
+			t.Errorf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GET /static/style.css", func(t *testing.T) {
+		rec := get(t, "/static/style.css")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: %d", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), ".media-grid") {
+			t.Error("CSS が配信されていない")
+		}
+		if rec.Header().Get("Cache-Control") != "no-cache" {
+			t.Errorf("Cache-Control: %q", rec.Header().Get("Cache-Control"))
+		}
+	})
+
+	t.Run("conjunction-required のみは API を呼ばずエラー表示", func(t *testing.T) {
+		rec := get(t, "/search?images=1&mode=execute")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status: %d", rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "V01") {
+			t.Error("V01 エラーが表示されていない")
+		}
+		if !strings.Contains(body, "API は呼び出していません") {
+			t.Error("API を呼んでいないことを明示すべき")
+		}
+	})
+
+	t.Run("mode=estimate で見積り画面", func(t *testing.T) {
+		rec := get(t, "/search?kw=%E7%8C%AB&images=1&lang=ja&max=10&endpoint=recent&mode=estimate")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: %d body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "見積り") {
+			t.Error("見積り画面ではない")
+		}
+		if !strings.Contains(body, "10,000") {
+			t.Error("counts の総件数が出ていない")
+		}
+		if !strings.Contains(body, "この条件で検索する") {
+			t.Error("実行ボタンがない")
+		}
+		if !strings.Contains(body, "mode=execute") {
+			t.Error("実行リンクがない")
+		}
+		if !strings.Contains(body, "猫 has:images lang:ja -is:retweet") {
+			t.Error("生成クエリが表示されていない")
+		}
+	})
+
+	t.Run("mode=execute で結果画面", func(t *testing.T) {
+		rec := get(t, "/search?kw=%E7%8C%AB&max=10&endpoint=recent&mode=execute")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: %d body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "検索結果") {
+			t.Error("結果画面ではない")
+		}
+		if !strings.Contains(body, "sample_taro") {
+			t.Error("投稿が描画されていない")
+		}
+		if !strings.Contains(body, "フィクスチャモード") {
+			t.Error("フィクスチャモードバッジがない")
+		}
+	})
+
+	t.Run("mode 未指定はフォームに戻す", func(t *testing.T) {
+		rec := get(t, "/search?kw=%E7%8C%AB")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: %d", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), `action="/search"`) {
+			t.Error("フォームに戻すべき")
+		}
+	})
+
+	t.Run("フィクスチャモードではセッションコストが増えない", func(t *testing.T) {
+		app2 := testApp(t, Config{FixtureDir: "testdata"})
+		r2 := newRouter(app2)
+		for _, target := range []string{
+			"/search?kw=%E7%8C%AB&mode=estimate",
+			"/search?kw=%E7%8C%AB&mode=execute",
+		} {
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			r2.ServeHTTP(httptest.NewRecorder(), req)
+		}
+		if got := app2.session.Total(); got != 0 {
+			t.Errorf("フィクスチャモードでは課金 0: got %v", got)
+		}
+	})
+
+	t.Run("recent で 8 日前を指定すると API を呼ばず V05", func(t *testing.T) {
+		rec := get(t, "/search?kw=%E7%8C%AB&start=2026-08-01T00:00&endpoint=recent&mode=execute")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status: %d", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "V05") {
+			t.Error("V05 エラーが必要")
+		}
+	})
+}
+
+// TestErrorPages は偽サーバで各エラー応答を再現し、専用の日本語画面が出ることを確認する。
+func TestErrorPages(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     int
+		body       string
+		wantStatus int
+		wantText   string
+	}{
+		{"400 不正なクエリ", http.StatusBadRequest,
+			`{"errors":[{"parameters":{"query":["has:images"]},"message":"no viable alternative"}],"title":"Invalid Request","detail":"One or more parameters to your request was invalid."}`,
+			http.StatusBadRequest, "課金なし"},
+		{"401 認証失敗", http.StatusUnauthorized,
+			`{"title":"Unauthorized","status":401,"detail":"Unauthorized"}`,
+			http.StatusForbidden, "BEARER_TOKEN"},
+		{"403 未エンロール", http.StatusForbidden,
+			`{"title":"Client Forbidden","reason":"client-not-enrolled","detail":"not attached to a Project"}`,
+			http.StatusForbidden, "client-not-enrolled"},
+		{"429 レートリミット", http.StatusTooManyRequests,
+			`{"title":"Too Many Requests","errors":[{"code":88,"message":"Rate limit exceeded"}]}`,
+			http.StatusTooManyRequests, "レートリミット"},
+		{"500 サーバエラー", http.StatusInternalServerError,
+			`{"title":"Internal Server Error"}`,
+			http.StatusBadGateway, "一時的なエラー"},
+		{"不正な JSON", http.StatusOK,
+			`{"data": [ broken`,
+			http.StatusBadGateway, "解析に失敗"},
+	}
+
+	const secret = "SECRET-BEARER-TOKEN-DO-NOT-LEAK-123456"
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("x-rate-limit-limit", "450")
+				w.Header().Set("x-rate-limit-remaining", "0")
+				w.Header().Set("x-rate-limit-reset", "1786000000")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			app := testApp(t, Config{BearerToken: secret, APIBaseURL: srv.URL})
+			app.client.sleep = func(time.Duration) {}
+			router := newRouter(app)
+
+			req := httptest.NewRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=execute", nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Errorf("status: got %d, want %d", rec.Code, tc.wantStatus)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, tc.wantText) {
+				t.Errorf("エラー画面に %q が含まれていない:\n%s", tc.wantText, truncate(body, 400))
+			}
+			// トークンや Authorization は絶対に画面に出さない（P-TOKEN-LEAK）。
+			if strings.Contains(body, secret) {
+				t.Error("エラー画面にトークンが含まれている")
+			}
+			if strings.Contains(strings.ToLower(body), "authorization") {
+				t.Error("エラー画面に Authorization が含まれている")
+			}
+			if strings.Contains(body, srv.URL) {
+				t.Error("エラー画面にリクエスト URL が含まれている")
+			}
+			if !strings.Contains(body, "フォームに戻る") {
+				t.Error("フォームに戻るリンクがない")
+			}
+		})
+	}
+}
+
+// TestFormRoundTrip はフォーム → URL → フォームの往復が壊れないことを確認する（D-23）。
+func TestFormRoundTrip(t *testing.T) {
+	in := SearchForm{
+		Keywords: "猫 (犬 OR 鳥)", ExcludeWords: "速報", OrWords: "猫 犬", ExactPhrase: "機械学習 入門",
+		Hashtag: "#東京", FromUser: "nasa", ToUser: "spacex", MentionUser: "x", RetweetsOf: "nasa",
+		ListID: "123", ReplyMode: "only", ConversationID: "456", InReplyToPostID: "789",
+		HasImages: true, HasVideo: true, HasMedia: true, HasLinks: true, Lang: "ja",
+		MinLikes: 10, MinReplies: 20, MinReposts: 30, IncludeReposts: true,
+		StartLocal: "2026-08-12T00:00", EndLocal: "2026-08-13T00:00",
+		Endpoint: "all", MaxResults: 25,
+	}
+	u := searchURL(in, "estimate", "tok")
+	parsed, err := parseQueryOf(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := parseSearchForm(parsed)
+	out.PaginationToken = "" // token は別扱い
+	in2 := in
+	in2.PaginationToken = ""
+	if out != in2 {
+		t.Errorf("往復で値が変わった:\n got  %+v\n want %+v", out, in2)
+	}
+	if parsed.Get("mode") != "estimate" || parsed.Get("token") != "tok" {
+		t.Errorf("mode / token が載っていない: %v", parsed)
+	}
+}
+
+func parseQueryOf(target string) (url.Values, error) {
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	return req.URL.Query(), nil
+}
+
+// TestExecuteSearchIsOnlyBillingPath は課金経路がゲートを通ることを確認する。
+func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
+	searchCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 課金対象の検索呼び出しだけを数える（/usage/tweets は cap 表示のために呼ばれる）。
+		if strings.HasPrefix(r.URL.Path, "/tweets/search/") {
+			searchCalls++
+		}
+		_, _ = w.Write([]byte(`{"data":[],"meta":{"result_count":0}}`))
+	}))
+	defer srv.Close()
+
+	app := testApp(t, Config{BearerToken: "t", APIBaseURL: srv.URL, SessionBudgetUSD: 0.001})
+	router := newRouter(app)
+
+	// セッション予算 $0.001 では max_results=10（最大 $0.15）が通らない。
+	req := httptest.NewRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=execute", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("ゲートで止めるべき: status=%d", rec.Code)
+	}
+	if searchCalls != 0 {
+		t.Errorf("ゲート不成立時に検索 API を呼んではいけない: searchCalls=%d", searchCalls)
+	}
+	if !strings.Contains(rec.Body.String(), "セッション") {
+		t.Errorf("理由が表示されていない: %s", truncate(rec.Body.String(), 300))
+	}
+}
+
+func TestExecuteSearchDispatch(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		_, _ = w.Write([]byte(`{"data":[],"meta":{"result_count":0}}`))
+	}))
+	defer srv.Close()
+
+	app := testApp(t, Config{BearerToken: "t", APIBaseURL: srv.URL})
+	app.client.pacer.sleep = func(time.Duration) {}
+
+	p := SearchParams{Query: "猫", MaxResults: 10, Endpoint: EndpointRecent}
+	if _, _, err := app.executeSearch(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	p.Endpoint = EndpointAll
+	if _, _, err := app.executeSearch(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/tweets/search/recent", "/tweets/search/all"}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Errorf("paths[%d] = %q, want %q", i, paths[i], want[i])
+		}
+	}
+}
+
+// TestDisplayRequirementsLinks は表示要件の「プロフィール画像・表示名・@username を
+// いずれもプロフィールへリンクする」「タイムスタンプの隣に X で表示を置く」を検証する。
+// 原文（developer.x.com/en/developer-terms/display-requirements・2026-08-13 に取得成功）に基づく。
+func TestDisplayRequirementsLinks(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+	v := sampleViewResult(t, "search_recent_photos.json")
+	out := mustRender(t, app, "results.html", ResultsPage{
+		Page:    app.page("検索結果", CapStatus{}, EndpointRecent),
+		Result:  v,
+		FormURL: "/",
+	})
+
+	profile := "https://x.com/sample_taro"
+	if !strings.Contains(out, `<a href="`+profile+`" rel="noreferrer" aria-label=`) {
+		t.Error("プロフィール画像がプロフィールへリンクしていない")
+	}
+	if !strings.Contains(out, `<a class="author-name" href="`+profile+`"`) {
+		t.Error("表示名がプロフィールへリンクしていない")
+	}
+	if !strings.Contains(out, `<a class="author-handle" href="`+profile+`"`) {
+		t.Error("@username がプロフィールへリンクしていない")
+	}
+	if !strings.Contains(out, `class="post-view-on-x"`) {
+		t.Error("「X で表示」リンクがない（アクションアイコンの代替）")
+	}
+	if !strings.Contains(out, "X で表示") {
+		t.Error("「X で表示」の文言がない")
+	}
+
+	// アバターは表示名・@username より前（左）に来る。
+	iAvatar := strings.Index(out, `class="avatar"`)
+	iName := strings.Index(out, `class="author-name"`)
+	iHandle := strings.Index(out, `class="author-handle"`)
+	if !(iAvatar < iName && iName < iHandle) {
+		t.Errorf("アバターは表示名・@username の左に置く: avatar=%d name=%d handle=%d", iAvatar, iName, iHandle)
+	}
+
+	// 投稿者不明のカードではプロフィールリンクを出さない（リンク先が存在しない）。
+	if strings.Contains(out, `href="https://x.com/unknown"`) {
+		t.Error("プレースホルダ作者に対してプロフィールリンクを出してはいけない")
+	}
+}
+
+// TestHeaderShowsUsageCounts はヘッダに月次 cap の実数が出ることを確認する。
+// パーセント表示だけだと消費が少ないとき 0.0% になり、実 API 実行前後の増加が読み取れない。
+func TestHeaderShowsUsageCounts(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+	p := FormPage{
+		Page:        app.page("検索", CapStatus{Usage: 62, Cap: 2000000, Ratio: 0.000031, Known: true, ResetDay: 12}, EndpointRecent),
+		Form:        SearchForm{MaxResults: 10, Endpoint: "recent"},
+		MaxOptions:  maxOptionsFor(100),
+		LangOptions: langOptions,
+	}
+	out := mustRender(t, app, "form.html", p)
+	if !strings.Contains(out, "62 / 2,000,000") {
+		t.Error("ヘッダに project_usage / project_cap の実数が出ていない")
+	}
+	if !strings.Contains(out, "0.0%") {
+		t.Error("パーセント表示も併記すべき")
+	}
+}
+
+// resultsHTML は results.html を描画し、インライン <script> を除いた HTML を返す。
+func resultsHTML(t *testing.T, app *App, fixture string) string {
+	t.Helper()
+	v := sampleViewResult(t, fixture)
+	out := mustRender(t, app, "results.html", ResultsPage{
+		Page:        app.page("検索結果", CapStatus{}, EndpointRecent),
+		Result:      v,
+		FormURL:     "/",
+		EstimateURL: "/search?mode=estimate",
+		EmptyHints:  emptyHints(SearchForm{}),
+	})
+	return stripScripts(out)
+}
+
+// stripScripts はインライン <script> ブロックを取り除いた HTML を返す。
+// layout.html のインライン JS には #post-list / data-f-* / 「件表示中」といった
+// マークアップと同じ文字列が現れるため、マークアップの検証はこれを除いて行う
+// （JS 側の不変条件は TestInlineScriptInvariants が別に見る）。
+func stripScripts(html string) string {
+	var b strings.Builder
+	rest := html
+	for {
+		i := strings.Index(rest, "<script>")
+		if i < 0 {
+			b.WriteString(rest)
+			return b.String()
+		}
+		b.WriteString(rest[:i])
+		j := strings.Index(rest[i:], "</script>")
+		if j < 0 {
+			return b.String() // 閉じタグが無いのは想定外
+		}
+		rest = rest[i+j+len("</script>"):]
+	}
+}
+
+// TestPostListMarkup は一覧ラッパとコントロールの構造を固定する（D-40 / D-41 / D-47 / D-56）。
+func TestPostListMarkup(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+	v := sampleViewResult(t, "search_recent_edge.json")
+	out := resultsHTML(t, app, "search_recent_edge.json")
+
+	// ラッパは 1 ページに 1 つだけ（A-12）。
+	if n := strings.Count(out, `id="post-list"`); n != 1 {
+		t.Errorf(`id="post-list" の出現回数 = %d, want 1`, n)
+	}
+	if n := strings.Count(out, `<div class="post-list" id="post-list">`); n != 1 {
+		t.Errorf("一覧ラッパの開始タグが 1 個であるべき: got %d", n)
+	}
+	if n := strings.Count(out, `id="list-controls"`); n != 1 {
+		t.Errorf(`id="list-controls" の出現回数 = %d, want 1`, n)
+	}
+
+	// カードはラッパの内側にある。
+	iControls := strings.Index(out, `id="list-controls"`)
+	iList := strings.Index(out, `id="post-list"`)
+	iFirstCard := strings.Index(out, `<article class="post"`)
+	iEmpty := strings.Index(out, `id="filter-empty"`)
+	iPaging := strings.Index(out, `class="paging"`)
+	if !(iControls < iList && iList < iFirstCard && iFirstCard < iEmpty && iEmpty < iPaging) {
+		t.Errorf("配置順が違う（コントロール → 一覧 → 0 件通知 → ページング）: controls=%d list=%d card=%d empty=%d paging=%d",
+			iControls, iList, iFirstCard, iEmpty, iPaging)
+	}
+
+	// カード数が Posts と一致し、サーバは何も隠さない。
+	if n := strings.Count(out, `<article class="post"`); n != len(v.Posts) {
+		t.Errorf("カード数 = %d, want %d", n, len(v.Posts))
+	}
+	if strings.Contains(out, `<article class="post" hidden`) {
+		t.Error("サーバがカードを hidden にしてはいけない")
+	}
+
+	// <form> を使わない（D-47 / P-FORM-ENTER）。list-controls の内側に <form> が無いこと。
+	controls := out[iControls:iList]
+	if strings.Contains(controls, "<form") {
+		t.Error("list-controls の内側に <form> があってはいけない（Enter で再検索が走る）")
+	}
+	if strings.Contains(controls, `type="submit"`) || strings.Contains(controls, `type="reset"`) {
+		t.Error("submit / reset ボタンを置いてはいけない")
+	}
+	if !strings.Contains(controls, `<button type="button" id="filter-reset"`) {
+		t.Error("リセットは <button type=\"button\"> であるべき")
+	}
+	// コントロールは既定で hidden（D-52）。
+	if !strings.Contains(out, `<div class="list-controls" id="list-controls" hidden>`) {
+		t.Error("list-controls は hidden 属性付きで出力する")
+	}
+	if !strings.Contains(out, `id="filter-empty" hidden>`) {
+		t.Error("filter-empty は hidden 属性付きで出力する")
+	}
+
+	// 件数の初期値はサーバが描画する（D-39）。
+	want := fmt.Sprintf(`role="status">%d / %d 件表示中`, v.ResultCount, v.ResultCount)
+	if !strings.Contains(out, want) {
+		t.Errorf("件数の初期値 %q が出力に無い", want)
+	}
+	if n := strings.Count(out, "件表示中"); n != 1 {
+		t.Errorf("「件表示中」の出現回数 = %d, want 1", n)
+	}
+
+	// メディアグリッドのクラス名を一覧に流用していない（P-CLASS-COLLIDE）。
+	head := out[:iFirstCard]
+	for _, bad := range []string{"grid-1", "grid-2", "grid-3", "grid-4"} {
+		if strings.Contains(head, bad) {
+			t.Errorf("一覧のマークアップに %q を使ってはいけない", bad)
+		}
+	}
+
+	// アクセシビリティ（AC-01 / AC-02 / AC-03 / AC-04）。
+	for _, want := range []string{
+		`<legend>表示列数</legend>`,
+		`<legend>このページの絞り込み（再検索なし）</legend>`,
+		`aria-describedby="cols-note"`,
+		`aria-describedby="filter-scope-note"`,
+		`aria-describedby="f-likes-note"`,
+		`role="status"`,
+		`<label for="f-runes-min">`,
+		`<label for="f-runes-max">`,
+		`<label for="f-media-min">`,
+		`<label for="f-likes-min">`,
+		`name="cols" value="1"`,
+		`name="cols" value="2"`,
+		`name="cols" value="3"`,
+		`id="f-no-reply"`, `id="f-no-repost"`, `id="f-no-quote"`,
+		`id="f-no-sensitive"`, `id="f-no-link"`,
+		"絞り込んでもコストは下がりません",
+		"検索結果の全体には及びません",
+		"画面幅が狭いときは自動的に列数を減らします",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("コントロールに %q が含まれていない", want)
+		}
+	}
+}
+
+// TestFilterDataAttributes はカードの data-f-* 属性を確認する（D-37 / D-48）。
+func TestFilterDataAttributes(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+
+	t.Run("エッジフィクスチャ", func(t *testing.T) {
+		v := sampleViewResult(t, "search_recent_edge.json")
+		out := resultsHTML(t, app, "search_recent_edge.json")
+
+		for _, attr := range []string{"data-f-runes", "data-f-media", "data-f-likes", "data-f-flags"} {
+			if n := strings.Count(out, attr); n != len(v.Posts) {
+				t.Errorf("%s の出現回数 = %d, want %d（カード 1 枚に 1 個）", attr, n, len(v.Posts))
+			}
+		}
+
+		// センシティブ投稿のフラグ。
+		if !strings.Contains(out, `data-f-flags="sensitive media photo"`) {
+			t.Error(`data-f-flags="sensitive media photo" が無い`)
+		}
+		// メトリクス欠落は -1（D-49）。
+		if !strings.Contains(out, `data-f-likes="-1"`) {
+			t.Error(`data-f-likes="-1" が無い（metrics 欠落の表現）`)
+		}
+		// like_count 0 は 0。
+		if !strings.Contains(out, `data-f-likes="0"`) {
+			t.Error(`data-f-likes="0" が無い（いいね 0 件の表現）`)
+		}
+		// note_post の rune 数。
+		if !strings.Contains(out, `data-f-runes="152"`) {
+			t.Error(`data-f-runes="152" が無い（note_post.text の rune 数）`)
+		}
+		// メディア 6 枚。
+		if !strings.Contains(out, `data-f-media="6"`) {
+			t.Error(`data-f-media="6" が無い`)
+		}
+		// bool を直接出していない（P-TEMPLATE-BOOL）。
+		if strings.Contains(out, `="true"`) || strings.Contains(out, `="false"`) {
+			t.Error("bool をそのまま属性値に出してはいけない")
+		}
+		// 初期状態でどのカードも隠れていない。
+		if strings.Contains(out, "post\" hidden") {
+			t.Error("初期状態でカードに hidden を付けてはいけない")
+		}
+	})
+
+	t.Run("動画フィクスチャ", func(t *testing.T) {
+		out := resultsHTML(t, app, "search_recent_video.json")
+		if !strings.Contains(out, `data-f-flags="media video"`) {
+			t.Error(`data-f-flags="media video" が無い`)
+		}
+		if !strings.Contains(out, `data-f-flags="media gif"`) {
+			t.Error(`data-f-flags="media gif" が無い`)
+		}
+	})
+}
+
+// TestZeroResultsHasNoControls は 0 件のときにコントロールを出さないことを確認する（D-56）。
+func TestZeroResultsHasNoControls(t *testing.T) {
+	app := testApp(t, Config{FixtureDir: "testdata"})
+	v := sampleViewResult(t, "search_recent_empty.json")
+	out := stripScripts(mustRender(t, app, "results.html", ResultsPage{
+		Page:       app.page("検索結果", CapStatus{}, EndpointRecent),
+		Result:     v,
+		FormURL:    "/",
+		EmptyHints: emptyHints(SearchForm{Lang: "ja", HasImages: true}),
+	}))
+
+	for _, bad := range []string{"post-list", "list-controls", "filter-count", "filter-empty", "件表示中", "表示列数"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("0 件のときに %q を出力してはいけない", bad)
+		}
+	}
+	// 既存の 0 件通知とヒントは残る。
+	if !strings.Contains(out, "0 件でした") {
+		t.Error("0 件のメッセージが消えている")
+	}
+	if !strings.Contains(out, "lang:ja") {
+		t.Error("EmptyHints が消えている")
+	}
+}
+
+// TestStyleSheetInvariants は static/style.css の不変条件を固定する（css_spec）。
+// staticFS から読むので、実際に配信される内容を検証している。
+func TestStyleSheetInvariants(t *testing.T) {
+	b, err := staticFS.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("style.css を読めない: %v", err)
+	}
+	css := string(b)
+
+	for _, want := range []string{
+		".post-list {",
+		".post-list > .post {",
+		`:root[data-cols="2"]`,
+		`:root[data-cols="3"]`,
+		"[hidden] { display: none !important; }",
+		"align-items: start",
+		".list-controls",
+		".filter-count",
+		"@media (max-width: 719px)",
+		"@media (max-width: 1039px)",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("style.css に %q が無い", want)
+		}
+	}
+
+	// P-GRID-1FR: 一覧のトラック定義は必ず minmax(0, 1fr)。
+	for _, bad := range []string{"repeat(2, 1fr)", "repeat(3, 1fr)"} {
+		if strings.Contains(css, bad) {
+			t.Errorf("style.css に %q を書いてはいけない（D-38 / P-GRID-1FR）", bad)
+		}
+	}
+	if n := strings.Count(css, "minmax(0, 1fr)"); n < 5 {
+		t.Errorf("minmax(0, 1fr) の出現回数 = %d, want >= 5", n)
+	}
+
+	// AC-08: フォーカスリングを消さない。
+	if strings.Contains(css, "outline: none") {
+		t.Error("outline: none を書いてはいけない（AC-08）")
+	}
+
+	// NG-17 / NG-18: multi-column（段組み）と masonry は使わない。
+	// 注意: `columns:` の単純な部分一致は grid-template-columns: に当たってしまうため
+	// （style.css には以前から複数ある）、直前が "-" でない出現だけを段組みと見なす。
+	for i := 0; i+len("columns:") <= len(css); i++ {
+		if !strings.HasPrefix(css[i:], "columns:") {
+			continue
+		}
+		if i > 0 && css[i-1] == '-' {
+			continue // grid-template-columns: など
+		}
+		t.Errorf("style.css に multi-column の columns: を書いてはいけない（NG-17）: %q", css[max(0, i-40):i+20])
+	}
+	for _, bad := range []string{"column-count", "column-gap", "rows: masonry"} {
+		if strings.Contains(css, bad) {
+			t.Errorf("style.css に %q を書いてはいけない", bad)
+		}
+	}
+
+	// D-42: 100vw による幅指定は横スクロールを生む。
+	if strings.Contains(css, "100vw") {
+		t.Error("100vw を使ってはいけない（スクロールバー幅で横スクロールが出る）")
+	}
+
+	// .avatar の意図的な円形指定が無傷であること（CS-05）。
+	if n := strings.Count(css, "border-radius: 50%"); n != 1 {
+		t.Errorf("border-radius: 50%% の出現回数 = %d, want 1（.avatar のみ）", n)
+	}
+
+	// P-HIDDEN-DISPLAY: .post に display を足していないこと。
+	post := css[strings.Index(css, "\n.post {"):]
+	post = post[:strings.Index(post, "}")]
+	if strings.Contains(post, "display") {
+		t.Error(".post に display を指定してはいけない（hidden 属性が効かなくなる）")
+	}
+}
+
+// TestInlineScriptInvariants はインライン JS の不変条件と行数予算を固定する（D-35 / D-55）。
+func TestInlineScriptInvariants(t *testing.T) {
+	b, err := templatesFS.ReadFile("templates/layout.html")
+	if err != nil {
+		t.Fatalf("layout.html を読めない: %v", err)
+	}
+	html := string(b)
+
+	// 外部 JS を持ち込まない（D-35）。
+	if strings.Contains(html, "<script src") {
+		t.Error("<script src> を書いてはいけない（D-35）")
+	}
+	// ネットワークアクセスをしない。
+	for _, bad := range []string{"fetch(", "XMLHttpRequest", "WebSocket"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("%q を使ってはいけない（絞り込みは取得済み DOM に対する操作）", bad)
+		}
+	}
+	// 表示状態を URL に載せない（D-36）。
+	for _, bad := range []string{"location", "history.push", "history.replace"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("%q を使ってはいけない（D-36）", bad)
+		}
+	}
+	// 既存の ES5 スタイルを維持する（js_spec.style_constraints）。
+	for _, bad := range []string{"=>", "const ", "let "} {
+		if strings.Contains(html, bad) {
+			t.Errorf("%q を使ってはいけない（既存の ES5 スタイルに揃える）", bad)
+		}
+	}
+	// localStorage は 2 箇所（head の getItem と body の setItem）だけ。
+	if n := strings.Count(html, "localStorage"); n != 2 {
+		t.Errorf("localStorage の出現回数 = %d, want 2", n)
+	}
+	// P-LS-THROW: どちらも try で囲われている。
+	if n := strings.Count(html, "try {"); n != 2 {
+		t.Errorf("try { の出現回数 = %d, want 2（localStorage アクセスがいずれも try 内）", n)
+	}
+	for _, part := range strings.Split(html, "localStorage")[:2] {
+		if !strings.Contains(part[max(0, len(part)-200):], "try {") {
+			t.Error("localStorage アクセスの直前に try { が無い（P-LS-THROW）")
+		}
+	}
+
+	// 必須の要素（列数の保存キー・絞り込みの土台）。
+	for _, want := range []string{
+		`"seekx.cols"`,
+		`setAttribute("data-cols"`,
+		`removeAttribute("data-cols")`,
+		`getElementById("post-list")`,
+		`getElementById("list-controls")`,
+		`removeAttribute("hidden")`,
+		`setAttribute("hidden", "")`,
+		`dialog[open]`,
+		"setTimeout(apply, 150)",
+		"textContent",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("インライン JS に %q が無い", want)
+		}
+	}
+	// innerHTML を使わない（AC-04）。
+	if strings.Contains(html, "innerHTML") {
+		t.Error("innerHTML を使ってはいけない")
+	}
+
+	// D-55: <script> ブロック内の総行数が 90 以下。
+	lines := strings.Split(html, "\n")
+	inScript := false
+	count := 0
+	for _, ln := range lines {
+		if strings.Contains(ln, "<script>") {
+			inScript = true
+		}
+		if inScript {
+			count++
+		}
+		if strings.Contains(ln, "</script>") {
+			inScript = false
+		}
+	}
+	if count > 90 {
+		t.Errorf("<script> ブロックの行数 = %d, want <= 90（D-55）", count)
+	}
+	t.Logf("インライン JS の行数: %d / 90", count)
+}

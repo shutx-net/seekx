@@ -1,0 +1,165 @@
+{
+  "data": [
+    {
+      "id": "1900000000000000101",
+      "text": "動画付きの投稿です。variants に mp4 3 種と m3u8 が入っています。",
+      "created_at": "2026-08-12T10:20:00.000Z",
+      "author_id": "10000001",
+      "conversation_id": "1900000000000000101",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000101"
+      ],
+      "attachments": {
+        "media_keys": [
+          "7_1000000000000000101"
+        ]
+      },
+      "public_metrics": {
+        "repost_count": 34,
+        "reply_count": 5,
+        "like_count": 210,
+        "quote_count": 2,
+        "bookmark_count": 19,
+        "impression_count": 54321
+      }
+    },
+    {
+      "id": "1900000000000000102",
+      "text": "GIF（animated_gif）の投稿です。bit_rate は返りません。",
+      "created_at": "2026-08-12T10:00:00.000Z",
+      "author_id": "10000002",
+      "conversation_id": "1900000000000000102",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000102"
+      ],
+      "attachments": {
+        "media_keys": [
+          "16_1000000000000000102"
+        ]
+      },
+      "public_metrics": {
+        "repost_count": 1,
+        "reply_count": 0,
+        "like_count": 17,
+        "quote_count": 0,
+        "bookmark_count": 1,
+        "impression_count": 640
+      }
+    },
+    {
+      "id": "1900000000000000103",
+      "text": "HLS のみの動画（mp4 variant が無い）投稿です。",
+      "created_at": "2026-08-12T09:40:00.000Z",
+      "author_id": "10000003",
+      "conversation_id": "1900000000000000103",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000103"
+      ],
+      "attachments": {
+        "media_keys": [
+          "7_1000000000000000103"
+        ]
+      }
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "10000001",
+        "name": "サンプル 太郎",
+        "username": "sample_taro",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000001/abcdefg_normal.jpg",
+        "verified": false,
+        "verified_type": "none"
+      },
+      {
+        "id": "10000002",
+        "name": "Sample Hanako",
+        "username": "sample_hanako",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000002/hijklmn_normal.png",
+        "verified": true,
+        "verified_type": "blue"
+      },
+      {
+        "id": "10000003",
+        "name": "テスト機関",
+        "username": "test_org",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1000000000000000003/opqrstu_normal.jpg",
+        "verified": true,
+        "verified_type": "business"
+      }
+    ],
+    "media": [
+      {
+        "media_key": "7_1000000000000000101",
+        "type": "video",
+        "preview_image_url": "https://pbs.twimg.com/ext_tw_video_thumb/1000000000000000101/pu/img/KKKKKKKKKKK.jpg",
+        "width": 1280,
+        "height": 720,
+        "duration_ms": 47320,
+        "variants": [
+          {
+            "content_type": "application/x-mpegURL",
+            "url": "https://video.twimg.com/ext_tw_video/1000000000000000101/pu/pl/playlist.m3u8"
+          },
+          {
+            "bit_rate": 832000,
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/ext_tw_video/1000000000000000101/pu/vid/640x360/mid.mp4"
+          },
+          {
+            "bit_rate": 2176000,
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/ext_tw_video/1000000000000000101/pu/vid/1280x720/high.mp4"
+          },
+          {
+            "bit_rate": 256000,
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/ext_tw_video/1000000000000000101/pu/vid/320x180/low.mp4"
+          }
+        ]
+      },
+      {
+        "media_key": "16_1000000000000000102",
+        "type": "animated_gif",
+        "preview_image_url": "https://pbs.twimg.com/tweet_video_thumb/LLLLLLLLLLL.jpg",
+        "width": 480,
+        "height": 270,
+        "variants": [
+          {
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/tweet_video/LLLLLLLLLLL.mp4"
+          }
+        ]
+      },
+      {
+        "media_key": "7_1000000000000000103",
+        "type": "video",
+        "preview_image_url": "https://pbs.twimg.com/ext_tw_video_thumb/1000000000000000103/pu/img/MMMMMMMMMMM.jpg",
+        "width": 1920,
+        "height": 1080,
+        "duration_ms": 8000,
+        "variants": [
+          {
+            "content_type": "application/x-mpegURL",
+            "url": "https://video.twimg.com/ext_tw_video/1000000000000000103/pu/pl/playlist.m3u8"
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {
+    "newest_id": "1900000000000000101",
+    "oldest_id": "1900000000000000103",
+    "result_count": 3
+  }
+}

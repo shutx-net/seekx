@@ -1,0 +1,41 @@
+{
+  "data": [
+    {
+      "id": "1900000000000000301",
+      "text": "部分成功のケース。投稿は返るが includes が欠ける。",
+      "created_at": "2026-08-12T12:00:00.000Z",
+      "author_id": "10000404",
+      "conversation_id": "1900000000000000301",
+      "lang": "ja",
+      "possibly_sensitive": false,
+      "reply_settings": "everyone",
+      "edit_history_post_ids": [
+        "1900000000000000301"
+      ],
+      "public_metrics": {
+        "repost_count": 0,
+        "reply_count": 0,
+        "like_count": 1,
+        "quote_count": 0,
+        "bookmark_count": 0,
+        "impression_count": 10
+      }
+    }
+  ],
+  "errors": [
+    {
+      "value": "10000404",
+      "detail": "Could not find user with id: [10000404].",
+      "title": "Not Found Error",
+      "resource_type": "user",
+      "parameter": "author_id",
+      "resource_id": "10000404",
+      "type": "https://api.twitter.com/2/problems/resource-not-found"
+    }
+  ],
+  "meta": {
+    "newest_id": "1900000000000000301",
+    "oldest_id": "1900000000000000301",
+    "result_count": 1
+  }
+}
