@@ -1,10 +1,11 @@
-package main
+package query
 
-// query.go はフォーム入力から検索クエリ文字列とリクエストパラメータを生成する。
+// package query はフォーム入力から検索クエリ文字列とリクエストパラメータを生成する。
 //
 // 制約（file_layout）:
 //   - HTTP パッケージを import しない
-//   - API を呼ばない
+//   - API を呼ばない（xapi.Endpoint / xapi.SearchParams という型だけを借りる）
+//   - internal/config を import しない（既定値は下の defaultMaxResultsCap）
 //   - 現在時刻を直接取得しない（now を引数で受け取る）
 //   - エラーメッセージは UI にそのまま出す日本語
 
@@ -14,15 +15,14 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/shutx-net/seekx/internal/xapi"
 )
 
-// Endpoint は検索エンドポイントの種別。
-type Endpoint string
-
-const (
-	EndpointRecent Endpoint = "recent"
-	EndpointAll    Endpoint = "all"
-)
+// defaultMaxResultsCap は Validate / BuildParams（cap 未指定版）が使う既定の UI 上限。
+// config.LoadConfig が SEEKX_MAX_RESULTS_CAP に使う既定値と同じ値でなければならない。
+// internal/config を import すると query が純粋でなくなるため、値を複製している。
+const defaultMaxResultsCap = 100
 
 // クエリ長の上限（rune 数。バイト数ではない・D-30 / R-05 / R-15）。
 const (
@@ -38,24 +38,6 @@ const recentWindow = 7 * 24 * time.Hour
 
 // end_time は now-30s にクランプする（A-10 / V07）。
 const endTimeSafetyMargin = 30 * time.Second
-
-// リクエストするフィールド一覧。post.fields と expansions を混同しない（P-EXPANSIONS-VS-FIELDS）。
-// フィールドセレクタは post.fields に統一する。旧名は使わない（D-10 / P-FIELDS-MIX）。
-var (
-	PostFieldsRequested = []string{
-		"created_at", "text", "lang", "public_metrics", "possibly_sensitive",
-		"conversation_id", "attachments", "note_post", "reply_settings",
-	}
-	ExpansionsDefault   = []string{"author_id", "attachments.media_keys"}
-	ExpansionsWithRefs  = []string{"author_id", "attachments.media_keys", "referenced_posts"}
-	UserFieldsRequested = []string{
-		"name", "username", "profile_image_url", "verified", "verified_type",
-	}
-	MediaFieldsRequested = []string{
-		"type", "url", "preview_image_url", "width", "height", "alt_text",
-		"duration_ms", "variants",
-	}
-)
 
 // SearchForm は UI の入力そのまま。
 type SearchForm struct {
@@ -86,22 +68,6 @@ type SearchForm struct {
 	Endpoint        string // "recent" | "all"
 	MaxResults      int
 	PaginationToken string
-}
-
-// SearchParams は xclient に渡すリクエストパラメータ。
-type SearchParams struct {
-	Query           string
-	MaxResults      int
-	StartTime       time.Time
-	EndTime         time.Time
-	SinceID         string
-	UntilID         string
-	PaginationToken string
-	PostFields      []string
-	Expansions      []string
-	UserFields      []string
-	MediaFields     []string
-	Endpoint        Endpoint
 }
 
 // OperatorSpec は演算子インベントリの 1 項目。
@@ -189,27 +155,27 @@ func QueryLength(q string) (runes int, bytes int) {
 }
 
 // QueryLimitFor はエンドポイントごとの rune 上限を返す。
-func QueryLimitFor(e Endpoint) int {
-	if e == EndpointAll {
+func QueryLimitFor(e xapi.Endpoint) int {
+	if e == xapi.EndpointAll {
 		return QueryLimitAll
 	}
 	return QueryLimitRecent
 }
 
 // EndpointName は画面表示用の名前を返す。
-func EndpointName(e Endpoint) string {
-	if e == EndpointAll {
+func EndpointName(e xapi.Endpoint) string {
+	if e == xapi.EndpointAll {
 		return "全期間"
 	}
 	return "直近7日"
 }
 
 // EndpointOf はフォームの文字列を Endpoint に変換する（不正値はそのまま保持して V14 で弾く）。
-func EndpointOf(s string) Endpoint {
+func EndpointOf(s string) xapi.Endpoint {
 	if s == "" {
-		return EndpointRecent
+		return xapi.EndpointRecent
 	}
-	return Endpoint(s)
+	return xapi.Endpoint(s)
 }
 
 var (
@@ -484,7 +450,7 @@ func termIsStandalone(t string) bool {
 }
 
 // validateQueryString は生成済みクエリ文字列そのものに対する検証（V01 / V02 / V13）。
-func validateQueryString(q string, ep Endpoint) []ValidationError {
+func validateQueryString(q string, ep xapi.Endpoint) []ValidationError {
 	var errs []ValidationError
 	if strings.TrimSpace(q) == "" {
 		errs = append(errs, ValidationError{"V13", "kw", "検索条件が入力されていません。"})
@@ -515,7 +481,7 @@ func ValidateWithCap(f SearchForm, now time.Time, maxResultsCap int) []Validatio
 	ep := EndpointOf(f.Endpoint)
 
 	// V14: endpoint
-	if ep != EndpointRecent && ep != EndpointAll {
+	if ep != xapi.EndpointRecent && ep != xapi.EndpointAll {
 		errs = append(errs, ValidationError{"V14", "endpoint", "検索範囲の指定が不正です。"})
 	}
 
@@ -579,7 +545,7 @@ func ValidateWithCap(f SearchForm, now time.Time, maxResultsCap int) []Validatio
 
 	// V04: max_results
 	epMax := 100
-	if ep == EndpointAll {
+	if ep == xapi.EndpointAll {
 		epMax = 500
 	}
 	if maxResultsCap > 0 && maxResultsCap < epMax {
@@ -683,7 +649,7 @@ func resolveTimeRange(f SearchForm, now time.Time) (start, end time.Time, warns 
 	}
 
 	// V05: recent は 7 日以内
-	if ep == EndpointRecent && !start.IsZero() {
+	if ep == xapi.EndpointRecent && !start.IsZero() {
 		floor := now.UTC().Add(-recentWindow).Add(1 * time.Minute)
 		if start.Before(floor) {
 			errs = append(errs, ValidationError{"V05", "start",
@@ -692,7 +658,7 @@ func resolveTimeRange(f SearchForm, now time.Time) (start, end time.Time, warns 
 	}
 
 	// full-archive の遡及下限（2006-03-21）
-	if ep == EndpointAll && !start.IsZero() && start.Before(fullArchiveFloor) {
+	if ep == xapi.EndpointAll && !start.IsZero() && start.Before(fullArchiveFloor) {
 		errs = append(errs, ValidationError{"V05", "start",
 			"「全期間」検索でも 2006 年 3 月 21 日より前は指定できません。"})
 	}
@@ -706,18 +672,18 @@ func resolveTimeRange(f SearchForm, now time.Time) (start, end time.Time, warns 
 }
 
 // BuildParams はフォームから SearchParams を組み立てる。検証に失敗した場合は API を呼ばずにエラーを返す。
-func BuildParams(f SearchForm, now time.Time) (SearchParams, []Warning, error) {
+func BuildParams(f SearchForm, now time.Time) (xapi.SearchParams, []Warning, error) {
 	return BuildParamsWithCap(f, now, defaultMaxResultsCap)
 }
 
 // BuildParamsWithCap は max_results の UI 上限を指定できる BuildParams。
-func BuildParamsWithCap(f SearchForm, now time.Time, maxResultsCap int) (SearchParams, []Warning, error) {
+func BuildParamsWithCap(f SearchForm, now time.Time, maxResultsCap int) (xapi.SearchParams, []Warning, error) {
 	q, warns := buildQueryString(f)
 	start, end, timeWarns, _ := resolveTimeRange(f, now)
 	warns = append(warns, timeWarns...)
 
 	if errs := ValidateWithCap(f, now, maxResultsCap); len(errs) > 0 {
-		return SearchParams{Query: q, Endpoint: EndpointOf(f.Endpoint)}, warns, ValidationErrors(errs)
+		return xapi.SearchParams{Query: q, Endpoint: EndpointOf(f.Endpoint)}, warns, ValidationErrors(errs)
 	}
 
 	maxResults := f.MaxResults
@@ -725,21 +691,21 @@ func BuildParamsWithCap(f SearchForm, now time.Time, maxResultsCap int) (SearchP
 		maxResults = 10
 	}
 
-	exps := ExpansionsDefault
+	exps := xapi.ExpansionsDefault
 	if f.IncludeReposts {
-		exps = ExpansionsWithRefs // RT/引用の元投稿を表示するため（D-20）
+		exps = xapi.ExpansionsWithRefs // RT/引用の元投稿を表示するため（D-20）
 	}
 
-	p := SearchParams{
+	p := xapi.SearchParams{
 		Query:           q,
 		MaxResults:      maxResults,
 		StartTime:       start,
 		EndTime:         end,
 		PaginationToken: strings.TrimSpace(f.PaginationToken),
-		PostFields:      PostFieldsRequested,
+		PostFields:      xapi.PostFieldsRequested,
 		Expansions:      exps,
-		UserFields:      UserFieldsRequested,
-		MediaFields:     MediaFieldsRequested,
+		UserFields:      xapi.UserFieldsRequested,
+		MediaFields:     xapi.MediaFieldsRequested,
 		Endpoint:        EndpointOf(f.Endpoint),
 	}
 
@@ -750,7 +716,7 @@ func BuildParamsWithCap(f SearchForm, now time.Time, maxResultsCap int) (SearchP
 	return p, warns, nil
 }
 
-func checkMutuallyExclusive(p SearchParams) error {
+func checkMutuallyExclusive(p xapi.SearchParams) error {
 	var errs ValidationErrors
 	if !p.StartTime.IsZero() && p.SinceID != "" {
 		errs = append(errs, ValidationError{"V03", "start", "開始日時と since_id は同時に指定できません。"})

@@ -1,4 +1,10 @@
-package main
+package config
+
+// package config は環境変数と .env からプロセス全体の設定を解決する。
+//
+// 制約（file_layout）:
+//   - 他の internal パッケージを import しない（このパッケージは依存グラフの葉である）
+//   - トークンの値をログ・エラーメッセージに出さない（P-TOKEN-LEAK）
 
 import (
 	"bufio"
@@ -128,8 +134,8 @@ func lookupEnv(dot map[string]string, key string) string {
 	return dot[key]
 }
 
-// maskToken はトークンをログに出せる形へマスクする。値そのものは復元できない。
-func maskToken(s string) string {
+// MaskToken はトークンをログに出せる形へマスクする。値そのものは復元できない。
+func MaskToken(s string) string {
 	n := utf8.RuneCountInString(s)
 	if n == 0 {
 		return "(未設定)"
@@ -207,8 +213,8 @@ func LoadConfig() (Config, error) {
 	return cfg, nil
 }
 
-// slogLevel は SEEKX_LOG_LEVEL を slog.Level に変換する。
-func slogLevel(s string) slog.Level {
+// SlogLevel は SEEKX_LOG_LEVEL を slog.Level に変換する。
+func SlogLevel(s string) slog.Level {
 	switch strings.ToLower(s) {
 	case "debug":
 		return slog.LevelDebug

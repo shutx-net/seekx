@@ -1,13 +1,14 @@
-package main
+package xapi
 
-// xclient.go は X API v2 のクライアント。
+// client.go は X API v2 のクライアント。
 //
 // 制約（file_layout）:
-//   - クエリ構文のバリデーションを行わない（query.go が済ませている前提。空クエリだけは防御的に弾く）
+//   - 他の internal パッケージを import しない（このパッケージは依存グラフの葉である）
+//   - クエリ構文のバリデーションを行わない（internal/query が済ませている前提。空クエリだけは防御的に弾く）
 //   - HTML やテンプレートに触らない
 //   - Authorization ヘッダやトークンをログ・エラーに出さない
-//   - includes の結合を行わない（model.go の責務）
-//   - 課金の可否判断を行わない（cost.go の責務）
+//   - includes の結合を行わない（internal/view の責務）
+//   - 課金の可否判断を行わない（internal/cost の責務）
 //   - goroutine で並行リクエストを投げない（直列固定）
 
 import (
@@ -26,24 +27,6 @@ import (
 	"sync"
 	"time"
 )
-
-// RateLimit は x-rate-limit-* ヘッダの内容。ヘッダ欠落時は nil を使う。
-type RateLimit struct {
-	Limit     int
-	Remaining int
-	Reset     time.Time
-}
-
-// ResetDisplay はリセット時刻を指定タイムゾーンで整形する。
-func (r *RateLimit) ResetDisplay(loc *time.Location) string {
-	if r == nil || r.Reset.IsZero() {
-		return ""
-	}
-	if loc == nil {
-		loc = time.UTC
-	}
-	return r.Reset.In(loc).Format("15:04:05")
-}
 
 // ErrorKind はエラーの分類。
 type ErrorKind int
@@ -208,6 +191,20 @@ const (
 // Client
 // ---------------------------------------------------------------------------
 
+// Options は Client の生成に必要な設定。internal/config を import しないために
+// Config そのものではなく必要な項目だけを受け取る（xapi を依存グラフの葉に保つ）。
+type Options struct {
+	BearerToken string
+	APIBaseURL  string
+	FixtureDir  string // 非空ならフィクスチャモード（API を叩かない）
+	FixtureFile string
+	RawDumpDir  string
+
+	// Sleep はリトライ・ペーシングの待機に使う。nil なら time.Sleep。
+	// テストで実時間を待たないための注入口（本番では常に nil）。
+	Sleep func(time.Duration)
+}
+
 type Client struct {
 	httpClient  *http.Client
 	token       string
@@ -226,23 +223,27 @@ type Client struct {
 	usageResp *UsageResponse
 }
 
-func NewClient(cfg Config, log *slog.Logger) *Client {
+func NewClient(opts Options, log *slog.Logger) *Client {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	c := &Client{
-		token:       cfg.BearerToken,
-		baseURL:     strings.TrimSuffix(cfg.APIBaseURL, "/"),
+		token:       opts.BearerToken,
+		baseURL:     strings.TrimSuffix(opts.APIBaseURL, "/"),
 		pacer:       newPacer(fullArchiveMinInterval),
-		fixtureDir:  cfg.FixtureDir,
-		fixtureFile: cfg.FixtureFile,
-		rawDumpDir:  cfg.RawDumpDir,
+		fixtureDir:  opts.FixtureDir,
+		fixtureFile: opts.FixtureFile,
+		rawDumpDir:  opts.RawDumpDir,
 		log:         log,
 		sleep:       time.Sleep,
 		now:         time.Now,
 	}
+	if opts.Sleep != nil {
+		c.sleep = opts.Sleep
+		c.pacer.sleep = opts.Sleep
+	}
 	// フィクスチャモードでは HTTP クライアントを作らない（課金経路が存在しないことを型で担保する・D-22）。
-	if cfg.FixtureDir == "" {
+	if opts.FixtureDir == "" {
 		c.httpClient = &http.Client{Timeout: httpTimeout}
 	}
 	return c

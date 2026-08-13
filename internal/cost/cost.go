@@ -1,22 +1,20 @@
-package main
+package cost
 
-// cost.go は単価定数・コスト見積り・月次 cap ガード・セッション累計コストを担う。
+// package cost はコスト見積り・月次 cap ガード・セッション累計コストを担う。
 //
 // 制約（file_layout）:
-//   - HTTP 呼び出しを行わない（usage の取得は xclient.go、判定は cost.go）
+//   - HTTP 呼び出しを行わない（usage の取得は internal/xapi、判定はここ）
 //   - テンプレートに依存しない
+//
+// 単価そのもの（CostPerPostRead など）は「API についての事実」なので
+// internal/xapi に置いてある。ここはその単価を使う「方針」の側。
 
 import (
 	"fmt"
 	"sync"
-)
 
-// 単価（api_reference.cost_model）。
-const (
-	CostPerPostRead     = 0.005
-	CostPerUserRead     = 0.010
-	CostPerCountsRecent = 0.005
-	CostPerCountsAll    = 0.010
+	"github.com/shutx-net/seekx/internal/config"
+	"github.com/shutx-net/seekx/internal/xapi"
 )
 
 // MonthlyPostCapDefault は project_cap を取得できなかった場合の既定値。
@@ -55,7 +53,7 @@ func (c CapStatus) IsWarn() bool  { return c.Level == CapWarn }
 func (c CapStatus) IsBlock() bool { return c.Level == CapBlock }
 
 // EvaluateCap は usage レスポンスから CapStatus を作る。cap 0 のゼロ除算を避ける。
-func EvaluateCap(u *UsageResponse) CapStatus {
+func EvaluateCap(u *xapi.UsageResponse) CapStatus {
 	if u == nil {
 		return CapStatus{Cap: MonthlyPostCapDefault}
 	}
@@ -91,7 +89,7 @@ type Estimate struct {
 	TotalMinUSD    float64
 	TotalMaxUSD    float64
 	Granularity    string
-	Buckets        []CountBucket
+	Buckets        []xapi.CountBucket
 	CountsCostUSD  float64
 }
 
@@ -111,8 +109,8 @@ func EstimateSearch(total int, maxResults int) Estimate {
 	e := Estimate{
 		TotalMatched:   total,
 		WillFetch:      willFetch,
-		PostCostUSD:    float64(willFetch) * CostPerPostRead,
-		MaxUserCostUSD: float64(willFetch) * CostPerUserRead,
+		PostCostUSD:    float64(willFetch) * xapi.CostPerPostRead,
+		MaxUserCostUSD: float64(willFetch) * xapi.CostPerUserRead,
 	}
 	e.TotalMinUSD = e.PostCostUSD
 	e.TotalMaxUSD = e.PostCostUSD + e.MaxUserCostUSD
@@ -124,15 +122,15 @@ func MaxCostFor(maxResults int) float64 {
 	if maxResults <= 0 {
 		return 0
 	}
-	return float64(maxResults) * CostPerPostRead
+	return float64(maxResults) * xapi.CostPerPostRead
 }
 
 // CountsCostFor は counts 1 リクエストの単価を返す。
-func CountsCostFor(e Endpoint) float64 {
-	if e == EndpointAll {
-		return CostPerCountsAll
+func CountsCostFor(e xapi.Endpoint) float64 {
+	if e == xapi.EndpointAll {
+		return xapi.CostPerCountsAll
 	}
-	return CostPerCountsRecent
+	return xapi.CostPerCountsRecent
 }
 
 // SessionSpend はプロセス起動からの累計推定コスト。
@@ -163,7 +161,7 @@ func (s *SessionSpend) CallCount() int {
 
 // GateAllows は課金経路を通してよいかを判定する（cost_control.budget_guard）。
 // cap Block / セッション予算超過 / 見積り最大額が残予算を超える場合に false と日本語理由を返す。
-func GateAllows(cap CapStatus, session *SessionSpend, est Estimate, cfg Config) (bool, string) {
+func GateAllows(cap CapStatus, session *SessionSpend, est Estimate, cfg config.Config) (bool, string) {
 	if cap.Level == CapBlock && !cfg.AllowOverCap {
 		return false, fmt.Sprintf(
 			"月次上限の %.1f%% を消費しているため実行を停止しました（%d / %d post reads）。cap は毎月 %d 日にリセットされます。続行するには SEEKX_ALLOW_OVER_CAP=1 を設定して再起動してください。",

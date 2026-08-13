@@ -20,10 +20,40 @@ devcontainer up --workspace-folder . --config .devcontainer/go/devcontainer.json
 
 # 課金ゼロのフィクスチャモードで UI を確認する
 devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json \
-  env SEEKX_FIXTURE_DIR=testdata go run .
+  env SEEKX_FIXTURE_DIR=testdata go run ./cmd/seekx
 
 # 実 API に接続して起動する（課金が発生します）
-devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go run .
+devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go run ./cmd/seekx
 ```
 
 テストは実 API を叩きません。`httptest` の偽サーバと `testdata/` のフィクスチャだけで完結します。
+
+```sh
+devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go build ./...
+devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go vet ./...
+devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go test ./...
+```
+
+## パッケージ構成
+
+エントリポイントは `cmd/seekx`、実装は `internal/` 配下です。依存の向きは一方向で、
+`go build ./...` が循環の不在を保証します。
+
+```
+cmd/seekx  ──> config, query, cost, view, xapi   （main.go・templates/・static/）
+cost       ──> config, xapi
+query      ──> xapi
+view       ──> xapi                （query と cost を import しない）
+config     ──> 標準ライブラリのみ
+xapi       ──> 標準ライブラリのみ   （internal を一切 import しない葉）
+```
+
+- `internal/xapi` … X API についての事実（レスポンス型、`Endpoint`、`SearchParams`、公表単価、HTTP クライアント）
+- `internal/view` … `includes` の結合と ViewModel の構築（純粋関数のみ）
+- `internal/query` … 検索クエリの組み立てと全バリデーション（V01〜V14）
+- `internal/cost` … 見積り、月次 cap ガード、セッション累計（方針の側）
+- `internal/config` … `Config`、`.env` パーサ、`DefaultPort`、タイムゾーン解決
+
+`testdata/` はリポジトリ直下に置いたままです（`SEEKX_FIXTURE_DIR=testdata` は
+リポジトリ直下を作業ディレクトリとして起動する前提のため）。各パッケージのテストは
+`../../testdata` で参照します。

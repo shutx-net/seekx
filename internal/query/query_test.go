@@ -1,10 +1,12 @@
-package main
+package query
 
 import (
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/shutx-net/seekx/internal/xapi"
 )
 
 // TestBuildQuery は query_builder.worked_examples の 9 例をそのままテストケースにする。
@@ -248,7 +250,7 @@ func TestQueryLength(t *testing.T) {
 		if runes > QueryLimitRecent {
 			t.Fatalf("前提が崩れている: runes=%d は 512 以下であるべき", runes)
 		}
-		errs := validateQueryString(q, EndpointRecent)
+		errs := validateQueryString(q, xapi.EndpointRecent)
 		for _, e := range errs {
 			if e.RuleID == "V02" {
 				t.Fatalf("バイト基準で誤って拒否している（日本語クエリが約 170 文字で使えなくなる）: %s", e.Message)
@@ -262,7 +264,7 @@ func TestQueryLength(t *testing.T) {
 		if runes != 539 || bytes != 1259 {
 			t.Fatalf("前提: runes=%d bytes=%d（want 539 / 1259）", runes, bytes)
 		}
-		errs := validateQueryString(q, EndpointRecent)
+		errs := validateQueryString(q, xapi.EndpointRecent)
 		found := false
 		for _, e := range errs {
 			if e.RuleID == "V02" {
@@ -283,7 +285,7 @@ func TestQueryLength(t *testing.T) {
 			if utf8.RuneCountInString(q) != n {
 				t.Fatalf("前提が崩れている")
 			}
-			errs := validateQueryString(q, EndpointRecent)
+			errs := validateQueryString(q, xapi.EndpointRecent)
 			hasV02 := false
 			for _, e := range errs {
 				if e.RuleID == "V02" {
@@ -302,17 +304,17 @@ func TestQueryLength(t *testing.T) {
 	t.Run("full-archive の上限は 1024 rune", func(t *testing.T) {
 		// 513〜1024 rune は recent では NG、all では OK。
 		q := strings.Repeat("あ", 700)
-		if errs := validateQueryString(q, EndpointRecent); len(errs) == 0 {
+		if errs := validateQueryString(q, xapi.EndpointRecent); len(errs) == 0 {
 			t.Error("recent では 700 rune は V02 エラーになるべき")
 		}
-		for _, e := range validateQueryString(q, EndpointAll) {
+		for _, e := range validateQueryString(q, xapi.EndpointAll) {
 			if e.RuleID == "V02" {
 				t.Errorf("all では 700 rune は通過すべき: %s", e.Message)
 			}
 		}
 		long := strings.Repeat("あ", 1025)
 		found := false
-		for _, e := range validateQueryString(long, EndpointAll) {
+		for _, e := range validateQueryString(long, xapi.EndpointAll) {
 			if e.RuleID == "V02" {
 				found = true
 				if !strings.Contains(e.Message, "1024") {
@@ -334,10 +336,10 @@ func TestQueryLength(t *testing.T) {
 	})
 
 	t.Run("QueryLimitFor", func(t *testing.T) {
-		if QueryLimitFor(EndpointRecent) != 512 {
+		if QueryLimitFor(xapi.EndpointRecent) != 512 {
 			t.Error("recent は 512")
 		}
-		if QueryLimitFor(EndpointAll) != 1024 {
+		if QueryLimitFor(xapi.EndpointAll) != 1024 {
 			t.Error("all は 1024")
 		}
 	})
@@ -672,7 +674,7 @@ func TestBuildParams(t *testing.T) {
 		if p.MaxResults != 10 {
 			t.Errorf("MaxResults: got %d", p.MaxResults)
 		}
-		if p.Endpoint != EndpointRecent {
+		if p.Endpoint != xapi.EndpointRecent {
 			t.Errorf("Endpoint: got %q", p.Endpoint)
 		}
 		// post.fields に author_id を入れてはいけない（P-EXPANSIONS-VS-FIELDS）。
@@ -800,10 +802,10 @@ func TestValidateEndpointLimits(t *testing.T) {
 	})
 
 	t.Run("検索パスと counts パスの対応", func(t *testing.T) {
-		if SearchPath(EndpointRecent) != "/tweets/search/recent" || SearchPath(EndpointAll) != "/tweets/search/all" {
+		if xapi.SearchPath(xapi.EndpointRecent) != "/tweets/search/recent" || xapi.SearchPath(xapi.EndpointAll) != "/tweets/search/all" {
 			t.Error("SearchPath")
 		}
-		if CountsPath(EndpointRecent) != "/tweets/counts/recent" || CountsPath(EndpointAll) != "/tweets/counts/all" {
+		if xapi.CountsPath(xapi.EndpointRecent) != "/tweets/counts/recent" || xapi.CountsPath(xapi.EndpointAll) != "/tweets/counts/all" {
 			t.Error("CountsPath")
 		}
 	})

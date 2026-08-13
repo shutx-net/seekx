@@ -69,19 +69,47 @@
 
 | パス | 役割 |
 | --- | --- |
-| `main.go` | エントリポイント、ルーティング、HTTP ハンドラ、テンプレートの embed |
-| `config.go` | `Config`、`.env` パーサ、`DefaultPort`、タイムゾーン解決 |
-| `xclient.go` | X API v2 クライアント（パラメータ組み立て、リトライ、エラー分類、ペーシング、フィクスチャモード） |
-| `model.go` | API レスポンスの struct、`includes` の結合、ViewModel の構築（純粋関数のみ） |
-| `query.go` | フォームから検索クエリを組み立て、全バリデーション（V01〜V14）を行う |
-| `cost.go` | 単価定数、コスト見積り、月次 cap ガード、セッション累計 |
-| `templates/` | `html/template`（`//go:embed`） |
-| `static/` | CSS と X 公式ロゴ（`//go:embed`） |
-| `testdata/` | テスト・フィクスチャモード用の JSON |
+| `cmd/seekx/main.go` | エントリポイント、ルーティング、HTTP ハンドラ、ページの ViewModel、テンプレートの embed |
+| `cmd/seekx/templates/` | `html/template`（`//go:embed`） |
+| `cmd/seekx/static/` | CSS と X 公式ロゴ（`//go:embed`） |
+| `internal/xapi/` | X API v2 クライアントとレスポンス型。`Endpoint`・`SearchParams`・公表単価もここ（リトライ、エラー分類、ペーシング、フィクスチャモード） |
+| `internal/view/` | `includes` の結合、ViewModel（`ViewPost` など）の構築、一覧の絞り込みキー（純粋関数のみ） |
+| `internal/query/` | フォームから検索クエリを組み立て、全バリデーション（V01〜V14）を行う |
+| `internal/cost/` | コスト見積り、月次 cap ガード、セッション累計 |
+| `internal/config/` | `Config`、`.env` パーサ、`DefaultPort`、タイムゾーン解決 |
+| `testdata/` | テスト・フィクスチャモード用の JSON（リポジトリ直下のまま） |
+
+依存の向きは一方向です（`go build ./...` が循環の不在を保証します）。
+
+```
+cmd/seekx  ──> config, query, cost, view, xapi
+cost       ──> config, xapi
+query      ──> xapi
+view       ──> xapi                （query と cost を import しない）
+config     ──> 標準ライブラリのみ
+xapi       ──> 標準ライブラリのみ   （internal を一切 import しない葉）
+```
+
+## 起動
+
+設定ファイルが `.devcontainer/go/` 配下にあるため、devcontainer CLI の自動検出が曖昧になります。
+**すべてのコマンドで `--config` を明示してください。**
+
+```sh
+# 課金ゼロのフィクスチャモードで UI を確認する
+devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json \
+  env SEEKX_FIXTURE_DIR=testdata go run ./cmd/seekx
+
+# 実 API に接続して起動する（課金が発生します）
+devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go run ./cmd/seekx
+```
+
+`.env` はプロセスの作業ディレクトリから解決します。上のようにリポジトリ直下から
+`go run ./cmd/seekx` する限り、`.env` と `SEEKX_FIXTURE_DIR=testdata` の位置は変わりません。
 
 ## 表示要件（X の Display requirements）への対応
 
-各投稿カードで以下を満たしています（`templates/_post.html`）。
+各投稿カードで以下を満たしています（`cmd/seekx/templates/_post.html`）。
 
 - 投稿者の表示名・`@username`・プロフィール画像を表示し、**いずれもプロフィールへリンク**しています。
 - プロフィール画像は表示名・`@username` の**左**に配置しています。
@@ -89,7 +117,7 @@
   `white-space: pre-wrap` で表現します）。280 文字超の投稿は `note_post.text` の全文を表示します。
 - X 公式ロゴを投稿カードの**右上**に置き、恒久リンク（`https://x.com/{username}/status/{id}`）にしています。
   ロゴは X 公式ブランドツールキット（`about.x.com/en/who-we-are/brand-toolkit` の `x-logo.zip`）の
-  `logo.svg` を**改変せず**`static/x-logo.svg` として配置しています。白抜き版のため、
+  `logo.svg` を**改変せず**`cmd/seekx/static/x-logo.svg` として配置しています。白抜き版のため、
   ブランドガイドラインに沿って黒地の上に表示しています。
 - タイムスタンプを表示し、恒久リンクにしています。返信・リポスト・いいねのアクションは実装しないため、
   代わりにタイムスタンプの隣に「X で表示」を置いています（表示要件が認めている代替手段）。

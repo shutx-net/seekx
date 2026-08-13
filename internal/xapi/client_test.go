@@ -1,4 +1,4 @@
-package main
+package xapi
 
 import (
 	"context"
@@ -25,7 +25,7 @@ func newTestClient(t *testing.T, h http.Handler) (*Client, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	c := NewClient(Config{
+	c := NewClient(Options{
 		BearerToken: "test-token-not-a-real-secret",
 		APIBaseURL:  srv.URL,
 	}, discardLogger())
@@ -48,7 +48,7 @@ func testParams() SearchParams {
 }
 
 func TestClientSuccess(t *testing.T) {
-	body, err := os.ReadFile("testdata/search_recent_photos.json")
+	body, err := os.ReadFile("../../testdata/search_recent_photos.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestClientTimeParams(t *testing.T) {
 }
 
 func TestClientError400(t *testing.T) {
-	body, err := os.ReadFile("testdata/error_400_invalid_query.json")
+	body, err := os.ReadFile("../../testdata/error_400_invalid_query.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestClientError401(t *testing.T) {
 }
 
 func TestClientError403(t *testing.T) {
-	body, err := os.ReadFile("testdata/error_403_not_enrolled.json")
+	body, err := os.ReadFile("../../testdata/error_403_not_enrolled.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestClientError403(t *testing.T) {
 }
 
 func TestClientError429(t *testing.T) {
-	body, err := os.ReadFile("testdata/error_429.json")
+	body, err := os.ReadFile("../../testdata/error_429.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +544,7 @@ func TestPacer(t *testing.T) {
 }
 
 func TestClientFixtureMode(t *testing.T) {
-	c := NewClient(Config{FixtureDir: "testdata"}, discardLogger())
+	c := NewClient(Options{FixtureDir: "../../testdata"}, discardLogger())
 	if !c.FixtureMode() {
 		t.Fatal("フィクスチャモードであるべき")
 	}
@@ -589,7 +589,7 @@ func TestClientFixtureMode(t *testing.T) {
 	}
 
 	t.Run("SEEKX_FIXTURE_FILE で個別上書きできる", func(t *testing.T) {
-		c2 := NewClient(Config{FixtureDir: "testdata", FixtureFile: "search_recent_empty.json"}, discardLogger())
+		c2 := NewClient(Options{FixtureDir: "../../testdata", FixtureFile: "search_recent_empty.json"}, discardLogger())
 		r, _, err := c2.SearchRecent(context.Background(), testParams())
 		if err != nil {
 			t.Fatalf("エラー: %v", err)
@@ -670,7 +670,7 @@ func TestClientNoTokenInLogs(t *testing.T) {
 	defer srv.Close()
 
 	const secret = "SUPER-SECRET-TOKEN-VALUE-0123456789"
-	c := NewClient(Config{BearerToken: secret, APIBaseURL: srv.URL},
+	c := NewClient(Options{BearerToken: secret, APIBaseURL: srv.URL},
 		slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	c.sleep = func(time.Duration) {}
 

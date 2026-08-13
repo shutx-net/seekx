@@ -4,11 +4,11 @@ package main
 // ルーティング、HTTP ハンドラ、サーバ起動を担う。
 //
 // 制約（file_layout）:
-//   - X API へのリクエストを直接組み立てない（xclient.go の責務）
-//   - 検索クエリを組み立てない・検証しない（query.go の責務）
-//   - API レスポンスの struct を定義しない（model.go の責務）
-//   - 単価や見積り計算式を持たない（cost.go の責務）
-//   - ポート番号のリテラルを持たない（config.go の DefaultPort のみ）
+//   - X API へのリクエストを直接組み立てない（internal/xapi の責務）
+//   - 検索クエリを組み立てない・検証しない（internal/query の責務）
+//   - API レスポンスの struct を定義しない（internal/xapi の責務）
+//   - 単価や見積り計算式を持たない（internal/cost の責務）
+//   - ポート番号のリテラルを持たない（config.DefaultPort のみ）
 //   - テンプレートに *http.Request や Config をそのまま渡さない（ViewModel だけを渡す）
 
 import (
@@ -24,6 +24,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shutx-net/seekx/internal/config"
+	"github.com/shutx-net/seekx/internal/cost"
+	"github.com/shutx-net/seekx/internal/query"
+	"github.com/shutx-net/seekx/internal/view"
+	"github.com/shutx-net/seekx/internal/xapi"
 )
 
 //go:embed templates/*.html
@@ -63,25 +69,25 @@ var tmpl = template.Must(template.New("").Funcs(templateFuncs).ParseFS(templates
 
 // App は HTTP ハンドラが共有する依存。
 type App struct {
-	cfg     Config
-	client  *Client
+	cfg     config.Config
+	client  *xapi.Client
 	tmpl    *template.Template
 	log     *slog.Logger
-	session *SessionSpend
+	session *cost.SessionSpend
 	loc     *time.Location
 	now     func() time.Time
 }
 
 func main() {
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "起動できません: "+err.Error())
 		os.Exit(1)
 	}
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slogLevel(cfg.LogLevel)}))
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: config.SlogLevel(cfg.LogLevel)}))
 	log.Info("seekx を起動します",
-		"bearer_token", maskToken(cfg.BearerToken),
+		"bearer_token", config.MaskToken(cfg.BearerToken),
 		"fixture_mode", cfg.FixtureMode(),
 		"fixture_dir", cfg.FixtureDir,
 		"api_base", cfg.APIBaseURL,
@@ -95,10 +101,10 @@ func main() {
 
 	app := &App{
 		cfg:     cfg,
-		client:  NewClient(cfg, log),
+		client:  xapi.NewClient(clientOptions(cfg), log),
 		tmpl:    tmpl,
 		log:     log,
-		session: &SessionSpend{},
+		session: &cost.SessionSpend{},
 		loc:     cfg.Location(),
 		now:     time.Now,
 	}
@@ -117,6 +123,17 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Error("サーバの起動に失敗しました", "err", err)
 		os.Exit(1)
+	}
+}
+
+// clientOptions は Config から xapi.Options を作る（xapi は internal/config を import しない）。
+func clientOptions(cfg config.Config) xapi.Options {
+	return xapi.Options{
+		BearerToken: cfg.BearerToken,
+		APIBaseURL:  cfg.APIBaseURL,
+		FixtureDir:  cfg.FixtureDir,
+		FixtureFile: cfg.FixtureFile,
+		RawDumpDir:  cfg.RawDumpDir,
 	}
 }
 
@@ -155,7 +172,7 @@ type Page struct {
 	Title        string
 	SessionUSD   float64
 	SessionCalls int
-	Cap          CapStatus
+	Cap          cost.CapStatus
 	FixtureMode  bool
 	TZ           string
 	CountsCost   float64
@@ -173,14 +190,14 @@ type LangOption struct {
 
 type FormPage struct {
 	Page
-	Form           SearchForm
+	Form           query.SearchForm
 	Errors         []string
 	Warnings       []string
 	MaxOptions     []MaxOption
 	LangOptions    []LangOption
 	MaxCost        float64
-	StandaloneOps  []OperatorSpec
-	ConjunctionOps []OperatorSpec
+	StandaloneOps  []query.OperatorSpec
+	ConjunctionOps []query.OperatorSpec
 }
 
 type BucketView struct {
@@ -191,7 +208,7 @@ type BucketView struct {
 
 type EstimatePage struct {
 	Page
-	Form          SearchForm
+	Form          query.SearchForm
 	Query         string
 	QueryRunes    int
 	QueryBytes    int
@@ -203,7 +220,7 @@ type EstimatePage struct {
 	Granularity   string
 	Total         int
 	MaxResults    int
-	Est           Estimate
+	Est           cost.Estimate
 	Buckets       []BucketView
 	Warnings      []string
 	Allowed       bool
@@ -215,7 +232,7 @@ type EstimatePage struct {
 
 type ResultsPage struct {
 	Page
-	Result         ViewResult
+	Result         view.ViewResult
 	NextURL        string
 	PrevURL        string
 	NextCost       float64
@@ -242,7 +259,7 @@ type ErrorPage struct {
 	FormURL          string
 }
 
-func (a *App) page(title string, cap CapStatus, ep Endpoint) Page {
+func (a *App) page(title string, cap cost.CapStatus, ep xapi.Endpoint) Page {
 	return Page{
 		Title:        title,
 		SessionUSD:   a.session.Total(),
@@ -250,7 +267,7 @@ func (a *App) page(title string, cap CapStatus, ep Endpoint) Page {
 		Cap:          cap,
 		FixtureMode:  a.cfg.FixtureMode(),
 		TZ:           a.cfg.DisplayTZ,
-		CountsCost:   CountsCostFor(ep),
+		CountsCost:   cost.CountsCostFor(ep),
 	}
 }
 
@@ -276,7 +293,7 @@ func maxOptionsFor(cap int) []MaxOption {
 		if n > cap {
 			continue
 		}
-		label := fmt.Sprintf("%d 件（最大 $%.2f）", n, MaxCostFor(n))
+		label := fmt.Sprintf("%d 件（最大 $%.2f）", n, cost.MaxCostFor(n))
 		if n == 10 {
 			label += "・既定"
 		}
@@ -289,7 +306,7 @@ func maxOptionsFor(cap int) []MaxOption {
 // フォームと URL の相互変換（全状態を URL に載せる・D-23）
 // ---------------------------------------------------------------------------
 
-func parseSearchForm(q url.Values) SearchForm {
+func parseSearchForm(q url.Values) query.SearchForm {
 	atoiOr := func(key string, def int) int {
 		v := strings.TrimSpace(q.Get(key))
 		if v == "" {
@@ -307,9 +324,9 @@ func parseSearchForm(q url.Values) SearchForm {
 	}
 	ep := strings.TrimSpace(q.Get("endpoint"))
 	if ep == "" {
-		ep = string(EndpointRecent)
+		ep = string(xapi.EndpointRecent)
 	}
-	return SearchForm{
+	return query.SearchForm{
 		Keywords:        strings.TrimSpace(q.Get("kw")),
 		ExcludeWords:    strings.TrimSpace(q.Get("exclude")),
 		OrWords:         strings.TrimSpace(q.Get("or")),
@@ -341,7 +358,7 @@ func parseSearchForm(q url.Values) SearchForm {
 }
 
 // formValues は SearchForm を URL クエリに戻す（パラメータ名は 1 対 1 対応）。
-func formValues(f SearchForm) url.Values {
+func formValues(f query.SearchForm) url.Values {
 	v := url.Values{}
 	set := func(key, val string) {
 		if val != "" {
@@ -387,7 +404,7 @@ func formValues(f SearchForm) url.Values {
 	return v
 }
 
-func searchURL(f SearchForm, mode, token string) string {
+func searchURL(f query.SearchForm, mode, token string) string {
 	v := formValues(f)
 	if token != "" {
 		v.Set("token", token)
@@ -398,7 +415,7 @@ func searchURL(f SearchForm, mode, token string) string {
 	return "/search?" + v.Encode()
 }
 
-func formURL(f SearchForm) string {
+func formURL(f query.SearchForm) string {
 	v := formValues(f)
 	if len(v) == 0 {
 		return "/"
@@ -413,28 +430,28 @@ func formURL(f SearchForm) string {
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		a.renderError(w, r, http.StatusNotFound, "ページが見つかりません",
-			"URL を確認してください。", nil, SearchForm{})
+			"URL を確認してください。", nil, query.SearchForm{})
 		return
 	}
 	f := parseSearchForm(r.URL.Query())
 	a.renderForm(w, r, f, nil, nil, http.StatusOK)
 }
 
-func (a *App) renderForm(w http.ResponseWriter, r *http.Request, f SearchForm, errs []string, warns []string, status int) {
+func (a *App) renderForm(w http.ResponseWriter, r *http.Request, f query.SearchForm, errs []string, warns []string, status int) {
 	cap := a.capStatus(r.Context())
 	if f.MaxResults <= 0 {
 		f.MaxResults = 10
 	}
 	p := FormPage{
-		Page:           a.page("検索", cap, EndpointOf(f.Endpoint)),
+		Page:           a.page("検索", cap, query.EndpointOf(f.Endpoint)),
 		Form:           f,
 		Errors:         errs,
 		Warnings:       warns,
 		MaxOptions:     maxOptionsFor(a.cfg.MaxResultsCap),
 		LangOptions:    langOptions,
-		MaxCost:        MaxCostFor(f.MaxResults),
-		StandaloneOps:  StandaloneOperators,
-		ConjunctionOps: ConjunctionRequiredOperators,
+		MaxCost:        cost.MaxCostFor(f.MaxResults),
+		StandaloneOps:  query.StandaloneOperators,
+		ConjunctionOps: query.ConjunctionRequiredOperators,
 	}
 	a.render(w, status, "form.html", p)
 }
@@ -445,16 +462,16 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	mode := q.Get("mode")
 
 	// バリデーションは両モードの前に実行する。エラー時は API を呼ばずフォームに戻す。
-	if errs := ValidateWithCap(f, a.now().In(a.loc), a.cfg.MaxResultsCap); len(errs) > 0 {
+	if errs := query.ValidateWithCap(f, a.now().In(a.loc), a.cfg.MaxResultsCap); len(errs) > 0 {
 		a.log.Info("validation failed（API は呼び出していません）", "errors", len(errs), "mode", mode)
-		a.renderForm(w, r, f, ValidationErrors(errs).Messages(), nil, http.StatusBadRequest)
+		a.renderForm(w, r, f, query.ValidationErrors(errs).Messages(), nil, http.StatusBadRequest)
 		return
 	}
 
-	params, warns, err := BuildParamsWithCap(f, a.now().In(a.loc), a.cfg.MaxResultsCap)
+	params, warns, err := query.BuildParamsWithCap(f, a.now().In(a.loc), a.cfg.MaxResultsCap)
 	if err != nil {
 		var msgs []string
-		if verrs, ok := err.(ValidationErrors); ok {
+		if verrs, ok := err.(query.ValidationErrors); ok {
 			msgs = verrs.Messages()
 		} else {
 			msgs = []string{err.Error()}
@@ -474,34 +491,36 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) handleEstimate(w http.ResponseWriter, r *http.Request, f SearchForm, params SearchParams, warns []Warning) {
+func (a *App) handleEstimate(w http.ResponseWriter, r *http.Request, f query.SearchForm, params xapi.SearchParams, warns []query.Warning) {
 	ctx := r.Context()
 	cap := a.capStatus(ctx)
-	gran := CountsGranularity(params.StartTime, params.EndTime, a.now().UTC())
+	gran := query.CountsGranularity(params.StartTime, params.EndTime, a.now().UTC())
 
 	counts, _, err := a.client.Counts(ctx, params.Endpoint, params.Query, gran, params.StartTime, params.EndTime)
-	if !a.client.FixtureMode() {
-		a.session.Add(CountsCostFor(params.Endpoint)) // counts はリクエスト単位で課金される
-	}
 	if err != nil {
 		a.renderAPIError(w, r, err, f, params.Query)
 		return
 	}
+	// counts はリクエスト単位で課金されるが、リソースを返さない 400 / 429 は無課金なので
+	// 成功時のみ計上する（README の「HTTP 400 / 429 | 課金なし」と揃える）。
+	if !a.client.FixtureMode() {
+		a.session.Add(cost.CountsCostFor(params.Endpoint))
+	}
 
 	total := counts.Meta.TotalPostCount
-	est := EstimateSearch(total, params.MaxResults)
+	est := cost.EstimateSearch(total, params.MaxResults)
 	est.Granularity = gran
 	est.Buckets = counts.Data
-	est.CountsCostUSD = CountsCostFor(params.Endpoint)
+	est.CountsCostUSD = cost.CountsCostFor(params.Endpoint)
 
-	allowed, reason := GateAllows(cap, a.session, est, a.cfg)
+	allowed, reason := cost.GateAllows(cap, a.session, est, a.cfg)
 
 	p := EstimatePage{
 		Page:          a.page("見積り", cap, params.Endpoint),
 		Form:          f,
 		Query:         params.Query,
-		EndpointName:  EndpointName(params.Endpoint),
-		QueryLimit:    QueryLimitFor(params.Endpoint),
+		EndpointName:  query.EndpointName(params.Endpoint),
+		QueryLimit:    query.QueryLimitFor(params.Endpoint),
 		Granularity:   gran,
 		Total:         total,
 		MaxResults:    params.MaxResults,
@@ -514,22 +533,22 @@ func (a *App) handleEstimate(w http.ResponseWriter, r *http.Request, f SearchFor
 		ReestimateURL: searchURL(f, "estimate", ""),
 		FormURL:       formURL(f),
 	}
-	p.QueryRunes, p.QueryBytes = QueryLength(params.Query)
+	p.QueryRunes, p.QueryBytes = query.QueryLength(params.Query)
 	p.StartDisplay, p.EndDisplay = a.displayRange(params.StartTime, params.EndTime, params.Endpoint)
 	p.RangeUTC = utcRange(params.StartTime, params.EndTime)
 
 	a.render(w, http.StatusOK, "estimate.html", p)
 }
 
-func (a *App) handleExecute(w http.ResponseWriter, r *http.Request, f SearchForm, params SearchParams, warns []Warning) {
+func (a *App) handleExecute(w http.ResponseWriter, r *http.Request, f query.SearchForm, params xapi.SearchParams, warns []query.Warning) {
 	ctx := r.Context()
 	cap := a.capStatus(ctx)
 
 	// 総件数は不明なので max_results を上限として見積り、ゲートを通す。
-	est := EstimateSearch(params.MaxResults, params.MaxResults)
-	if allowed, reason := GateAllows(cap, a.session, est, a.cfg); !allowed {
+	est := cost.EstimateSearch(params.MaxResults, params.MaxResults)
+	if allowed, reason := cost.GateAllows(cap, a.session, est, a.cfg); !allowed {
 		a.log.Warn("実行をゲートで停止しました", "reason", reason)
-		a.renderError(w, r, http.StatusForbidden, KindUsageCap.Title(), reason,
+		a.renderError(w, r, http.StatusForbidden, xapi.KindUsageCap.Title(), reason,
 			[]string{
 				"月次 cap の場合: リセット日を待つか SEEKX_ALLOW_OVER_CAP=1 を設定して再起動してください。",
 				"セッション予算の場合: SEEKX_SESSION_BUDGET_USD を上げて再起動してください。",
@@ -544,37 +563,35 @@ func (a *App) handleExecute(w http.ResponseWriter, r *http.Request, f SearchForm
 		return
 	}
 
-	spent := float64(resp.Meta.ResultCount) * CostPerPostRead
+	spent := float64(resp.Meta.ResultCount) * xapi.CostPerPostRead
 	if !a.client.FixtureMode() {
 		a.session.Add(spent) // 実際に返った件数で計上する（max_results ではない）
 	}
 
-	view := BuildView(resp, ViewOptions{
+	result := view.BuildView(resp, view.ViewOptions{
 		Now:         a.now(),
 		Loc:         a.loc,
-		Form:        f,
-		Cap:         cap,
 		RateLimit:   rl,
 		SpentUSD:    spent,
 		SessionUSD:  a.session.Total(),
 		FixtureMode: a.cfg.FixtureMode(),
 		Log:         a.log,
 	})
-	view.QueryString = params.Query
-	view.QueryRunes, view.QueryBytes = QueryLength(params.Query)
-	view.QueryLimit = QueryLimitFor(params.Endpoint)
-	view.EndpointName = EndpointName(params.Endpoint)
-	view.MaxResults = params.MaxResults
-	view.StartDisplay, view.EndDisplay = a.displayRange(params.StartTime, params.EndTime, params.Endpoint)
-	view.Warnings = append(warningMessages(warns), view.Warnings...)
+	result.QueryString = params.Query
+	result.QueryRunes, result.QueryBytes = query.QueryLength(params.Query)
+	result.QueryLimit = query.QueryLimitFor(params.Endpoint)
+	result.EndpointName = query.EndpointName(params.Endpoint)
+	result.MaxResults = params.MaxResults
+	result.StartDisplay, result.EndDisplay = a.displayRange(params.StartTime, params.EndTime, params.Endpoint)
+	result.Warnings = append(warningMessages(warns), result.Warnings...)
 
-	pagingEst := EstimateSearch(params.MaxResults, params.MaxResults)
-	pagingAllowed, pagingReason := GateAllows(cap, a.session, pagingEst, a.cfg)
+	pagingEst := cost.EstimateSearch(params.MaxResults, params.MaxResults)
+	pagingAllowed, pagingReason := cost.GateAllows(cap, a.session, pagingEst, a.cfg)
 
 	p := ResultsPage{
 		Page:           a.page("検索結果", cap, params.Endpoint),
-		Result:         view,
-		NextCost:       MaxCostFor(params.MaxResults),
+		Result:         result,
+		NextCost:       cost.MaxCostFor(params.MaxResults),
 		PagingBlocked:  !pagingAllowed,
 		PagingReason:   pagingReason,
 		FormURL:        formURL(f),
@@ -582,11 +599,11 @@ func (a *App) handleExecute(w http.ResponseWriter, r *http.Request, f SearchForm
 		EmptyHints:     emptyHints(f),
 		RateLimitReset: rl.ResetDisplay(a.loc),
 	}
-	if view.NextToken != "" {
-		p.NextURL = searchURL(f, "execute", view.NextToken)
+	if result.NextToken != "" {
+		p.NextURL = searchURL(f, "execute", result.NextToken)
 	}
-	if view.PrevToken != "" {
-		p.PrevURL = searchURL(f, "execute", view.PrevToken)
+	if result.PrevToken != "" {
+		p.PrevURL = searchURL(f, "execute", result.PrevToken)
 	}
 
 	a.render(w, http.StatusOK, "results.html", p)
@@ -594,33 +611,33 @@ func (a *App) handleExecute(w http.ResponseWriter, r *http.Request, f SearchForm
 
 // executeSearch は post read の課金が発生する唯一の呼び出し箇所（cost_control.confirmation_gate_location）。
 // この関数の外から SearchRecent / SearchAll を呼んではならない。
-func (a *App) executeSearch(ctx context.Context, p SearchParams) (*SearchResponse, *RateLimit, error) {
-	if p.Endpoint == EndpointAll {
+func (a *App) executeSearch(ctx context.Context, p xapi.SearchParams) (*xapi.SearchResponse, *xapi.RateLimit, error) {
+	if p.Endpoint == xapi.EndpointAll {
 		return a.client.SearchAll(ctx, p)
 	}
 	return a.client.SearchRecent(ctx, p)
 }
 
 // capStatus は usage を（キャッシュ経由で）取得して CapStatus を返す。失敗しても検索は続行できる。
-func (a *App) capStatus(ctx context.Context) CapStatus {
+func (a *App) capStatus(ctx context.Context) cost.CapStatus {
 	u, err := a.client.Usage(ctx)
 	if err != nil {
 		a.log.Warn("usage の取得に失敗しました（cap 表示を省略します）", "err", err.Error())
-		return CapStatus{Cap: MonthlyPostCapDefault}
+		return cost.CapStatus{Cap: cost.MonthlyPostCapDefault}
 	}
-	cs := EvaluateCap(u)
+	cs := cost.EvaluateCap(u)
 	a.log.Info("usage",
 		"project_usage", cs.Usage, "project_cap", cs.Cap,
 		"ratio", cs.Ratio, "cap_reset_day", cs.ResetDay)
 	return cs
 }
 
-func (a *App) displayRange(start, end time.Time, ep Endpoint) (string, string) {
+func (a *App) displayRange(start, end time.Time, ep xapi.Endpoint) (string, string) {
 	const layout = "2006-01-02 15:04"
 	s, e := "指定なし", "指定なし"
 	if !start.IsZero() {
 		s = start.In(a.loc).Format(layout)
-	} else if ep == EndpointRecent {
+	} else if ep == xapi.EndpointRecent {
 		s = "7 日前（既定）"
 	} else {
 		s = "2006-03-21 以降（既定）"
@@ -647,7 +664,7 @@ func utcRange(start, end time.Time) string {
 	return s + " 〜 " + e
 }
 
-func warningMessages(warns []Warning) []string {
+func warningMessages(warns []query.Warning) []string {
 	if len(warns) == 0 {
 		return nil
 	}
@@ -658,7 +675,7 @@ func warningMessages(warns []Warning) []string {
 	return out
 }
 
-func bucketViews(buckets []CountBucket, loc *time.Location, gran string) []BucketView {
+func bucketViews(buckets []xapi.CountBucket, loc *time.Location, gran string) []BucketView {
 	if len(buckets) == 0 {
 		return nil
 	}
@@ -688,7 +705,7 @@ func bucketViews(buckets []CountBucket, loc *time.Location, gran string) []Bucke
 	return out
 }
 
-func emptyHints(f SearchForm) []string {
+func emptyHints(f query.SearchForm) []string {
 	var hints []string
 	if f.Lang != "" {
 		hints = append(hints, "言語フィルタ（lang:"+f.Lang+"）を外す")
@@ -702,7 +719,7 @@ func emptyHints(f SearchForm) []string {
 	if f.StartLocal != "" || f.EndLocal != "" {
 		hints = append(hints, "期間を広げる、または期間指定を外す")
 	}
-	if f.Endpoint != string(EndpointAll) {
+	if f.Endpoint != string(xapi.EndpointAll) {
 		hints = append(hints, "検索範囲を「全期間」に切り替える（直近 7 日に該当がない可能性）")
 	}
 	if f.MinLikes > 0 || f.MinReplies > 0 || f.MinReposts > 0 {
@@ -725,9 +742,9 @@ func (a *App) render(w http.ResponseWriter, status int, name string, data any) {
 	}
 }
 
-func (a *App) renderError(w http.ResponseWriter, r *http.Request, status int, heading, message string, steps []string, f SearchForm) {
+func (a *App) renderError(w http.ResponseWriter, r *http.Request, status int, heading, message string, steps []string, f query.SearchForm) {
 	p := ErrorPage{
-		Page:     a.page("エラー", a.capStatus(r.Context()), EndpointOf(f.Endpoint)),
+		Page:     a.page("エラー", a.capStatus(r.Context()), query.EndpointOf(f.Endpoint)),
 		Heading:  heading,
 		Message:  message,
 		Steps:    steps,
@@ -740,8 +757,8 @@ func (a *App) renderError(w http.ResponseWriter, r *http.Request, status int, he
 
 // renderAPIError は APIError を ErrorKind ごとの日本語画面に変換する。
 // トークン・Authorization ヘッダ・リクエスト URL 全文は絶対に出さない。
-func (a *App) renderAPIError(w http.ResponseWriter, r *http.Request, err error, f SearchForm, query string) {
-	ae, ok := err.(*APIError)
+func (a *App) renderAPIError(w http.ResponseWriter, r *http.Request, err error, f query.SearchForm, generatedQuery string) {
+	ae, ok := err.(*xapi.APIError)
 	if !ok {
 		a.renderError(w, r, http.StatusInternalServerError, "予期しないエラー", err.Error(), nil, f)
 		return
@@ -749,18 +766,18 @@ func (a *App) renderAPIError(w http.ResponseWriter, r *http.Request, err error, 
 
 	status := http.StatusBadGateway
 	switch ae.Kind {
-	case KindInvalidQuery:
+	case xapi.KindInvalidQuery:
 		status = http.StatusBadRequest
-	case KindUnauthorized, KindForbidden, KindForbiddenNotEnrolled:
+	case xapi.KindUnauthorized, xapi.KindForbidden, xapi.KindForbiddenNotEnrolled:
 		status = http.StatusForbidden
-	case KindNotFound:
+	case xapi.KindNotFound:
 		status = http.StatusNotFound
-	case KindRateLimited:
+	case xapi.KindRateLimited:
 		status = http.StatusTooManyRequests
 	}
 
 	p := ErrorPage{
-		Page:     a.page("エラー", a.capStatus(r.Context()), EndpointOf(f.Endpoint)),
+		Page:     a.page("エラー", a.capStatus(r.Context()), query.EndpointOf(f.Endpoint)),
 		Heading:  ae.Kind.Title(),
 		Message:  ae.UserMessage(a.loc),
 		Steps:    errorSteps(ae.Kind),
@@ -771,49 +788,49 @@ func (a *App) renderAPIError(w http.ResponseWriter, r *http.Request, err error, 
 		Messages: ae.Messages,
 		FormURL:  formURL(f),
 	}
-	if ae.Kind == KindInvalidQuery {
-		p.Query = query // 400 のときは生成クエリ全文を必ず出す
+	if ae.Kind == xapi.KindInvalidQuery {
+		p.Query = generatedQuery // 400 のときは生成クエリ全文を必ず出す
 	}
 	a.render(w, status, "error.html", p)
 }
 
-func errorSteps(k ErrorKind) []string {
+func errorSteps(k xapi.ErrorKind) []string {
 	switch k {
-	case KindInvalidQuery:
+	case xapi.KindInvalidQuery:
 		return []string{
 			"生成されたクエリを確認してください（HTTP 400 は課金されません）。",
 			"「画像付き」「言語」「返信のみ」などの条件だけでは検索できません。キーワードかアカウントを併せて指定してください。",
 			"クエリが長すぎる場合は条件を減らしてください（文字数で判定されます）。",
 		}
-	case KindUnauthorized:
+	case xapi.KindUnauthorized:
 		return []string{
 			"ワークスペース直下の .env の BEARER_TOKEN を確認してください。",
 			"X 開発者ポータルでトークンを再生成した場合は .env を更新して再起動してください。",
 		}
-	case KindForbiddenNotEnrolled:
+	case xapi.KindForbiddenNotEnrolled:
 		return []string{
 			"X 開発者ポータルで App が Project に紐付いているか確認してください。",
 			"pay-per-use のクレジット残高を確認してください。",
 			"アクセスレベルが検索エンドポイントを含むか確認してください。",
 		}
-	case KindRateLimited:
+	case xapi.KindRateLimited:
 		return []string{
 			"表示されたリセット時刻以降に再試行してください（429 は課金されません）。",
 			"「全期間」検索は 1 リクエスト/秒の制限があります。連続実行を避けてください。",
 		}
-	case KindServer:
+	case xapi.KindServer:
 		return []string{"数分待って再試行してください（自動で 3 回まで再試行しています）。"}
-	case KindNetwork:
+	case xapi.KindNetwork:
 		return []string{
 			"コンテナからインターネットに出られるか確認してください。",
 			"プロキシ環境の場合は HTTPS_PROXY の設定を確認してください。",
 		}
-	case KindDecode:
+	case xapi.KindDecode:
 		return []string{
 			"技術的な詳細のレスポンス断片を確認してください。",
 			"API のレスポンス形式が変わった可能性があります（フィールド名の変更）。",
 		}
-	case KindUsageCap:
+	case xapi.KindUsageCap:
 		return []string{"月次 cap またはセッション予算の設定を見直してください。"}
 	default:
 		return nil

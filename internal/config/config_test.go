@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -190,14 +190,14 @@ func TestMaskToken(t *testing.T) {
 		{"あいうえおかきくけこ", "あいうえ... (10 chars)"},
 	}
 	for _, tc := range cases {
-		if got := maskToken(tc.in); got != tc.want {
-			t.Errorf("maskToken(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := MaskToken(tc.in); got != tc.want {
+			t.Errorf("MaskToken(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 
 	// マスク結果に元のトークン全体が含まれないこと。
 	tok := "AAAABBBBCCCCDDDD"
-	if got := maskToken(tok); got == tok || len(got) > len(tok)+20 {
+	if got := MaskToken(tok); got == tok || len(got) > len(tok)+20 {
 		t.Errorf("マスクが不十分: %q", got)
 	}
 }

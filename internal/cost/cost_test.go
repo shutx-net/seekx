@@ -1,16 +1,37 @@
-package main
+package cost
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/shutx-net/seekx/internal/config"
+	"github.com/shutx-net/seekx/internal/xapi"
 )
 
-func usageResp(usage, cap, resetDay int) *UsageResponse {
-	u := &UsageResponse{}
-	u.Data.ProjectUsage = flexInt(usage)
-	u.Data.ProjectCap = flexInt(cap)
-	u.Data.CapResetDay = resetDay
+func loadFixture(t *testing.T, name string, out any) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("../../testdata", name))
+	if err != nil {
+		t.Fatalf("フィクスチャ %s の読み込みに失敗: %v", name, err)
+	}
+	if err := json.Unmarshal(b, out); err != nil {
+		t.Fatalf("フィクスチャ %s の Unmarshal に失敗: %v", name, err)
+	}
+}
+
+// usageResp は usage レスポンスを組み立てる。xapi.UsageResponse の数値フィールドは
+// 非公開型（flexInt）なので、実レスポンスと同じ JSON デコード経路で作る。
+func usageResp(usage, cap, resetDay int) *xapi.UsageResponse {
+	body := fmt.Sprintf(`{"data":{"project_id":"1","project_cap":%d,"project_usage":%d,"cap_reset_day":%d}}`, cap, usage, resetDay)
+	u := &xapi.UsageResponse{}
+	if err := json.Unmarshal([]byte(body), u); err != nil {
+		panic(err) // テスト内で組み立てる固定 JSON なので起こらない
+	}
 	return u
 }
 
@@ -52,19 +73,19 @@ func TestEstimateSearch(t *testing.T) {
 	}
 
 	t.Run("単価が仕様どおり", func(t *testing.T) {
-		if CostPerPostRead != 0.005 {
-			t.Errorf("post read: %v", CostPerPostRead)
+		if xapi.CostPerPostRead != 0.005 {
+			t.Errorf("post read: %v", xapi.CostPerPostRead)
 		}
-		if CostPerUserRead != 0.010 {
-			t.Errorf("user read: %v", CostPerUserRead)
+		if xapi.CostPerUserRead != 0.010 {
+			t.Errorf("user read: %v", xapi.CostPerUserRead)
 		}
-		if CostPerCountsRecent != 0.005 {
-			t.Errorf("counts recent: %v", CostPerCountsRecent)
+		if xapi.CostPerCountsRecent != 0.005 {
+			t.Errorf("counts recent: %v", xapi.CostPerCountsRecent)
 		}
-		if CostPerCountsAll != 0.010 {
-			t.Errorf("counts all: %v", CostPerCountsAll)
+		if xapi.CostPerCountsAll != 0.010 {
+			t.Errorf("counts all: %v", xapi.CostPerCountsAll)
 		}
-		if CountsCostFor(EndpointRecent) != 0.005 || CountsCostFor(EndpointAll) != 0.010 {
+		if CountsCostFor(xapi.EndpointRecent) != 0.005 || CountsCostFor(xapi.EndpointAll) != 0.010 {
 			t.Error("CountsCostFor の対応が不正")
 		}
 		if MaxCostFor(10) != 0.05 || MaxCostFor(100) != 0.5 || MaxCostFor(0) != 0 {
@@ -148,7 +169,7 @@ func TestEvaluateCap(t *testing.T) {
 	})
 
 	t.Run("文字列で返る project_usage も読める（R-04）", func(t *testing.T) {
-		var u UsageResponse
+		var u xapi.UsageResponse
 		loadFixture(t, "usage_string_usage.json", &u)
 		cs := EvaluateCap(&u)
 		if cs.Level != CapBlock {
@@ -158,7 +179,7 @@ func TestEvaluateCap(t *testing.T) {
 }
 
 func TestGateAllows(t *testing.T) {
-	baseCfg := Config{SessionBudgetUSD: 5.00}
+	baseCfg := config.Config{SessionBudgetUSD: 5.00}
 
 	t.Run("通常は許可", func(t *testing.T) {
 		ok, reason := GateAllows(EvaluateCap(usageResp(42, 2000000, 12)), &SessionSpend{}, EstimateSearch(10, 10), baseCfg)
@@ -233,7 +254,7 @@ func TestGateAllows(t *testing.T) {
 	})
 
 	t.Run("予算 0 は無制限として扱う", func(t *testing.T) {
-		cfg := Config{SessionBudgetUSD: 0}
+		cfg := config.Config{SessionBudgetUSD: 0}
 		s := &SessionSpend{}
 		s.Add(100)
 		ok, _ := GateAllows(EvaluateCap(usageResp(42, 2000000, 12)), s, EstimateSearch(10, 10), cfg)

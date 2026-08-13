@@ -2,16 +2,63 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shutx-net/seekx/internal/config"
+	"github.com/shutx-net/seekx/internal/cost"
+	"github.com/shutx-net/seekx/internal/query"
+	"github.com/shutx-net/seekx/internal/view"
+	"github.com/shutx-net/seekx/internal/xapi"
 )
 
-func testApp(t *testing.T, cfg Config) *App {
+// fixtureDir はリポジトリ直下の testdata を指す（go test の cwd はパッケージディレクトリ）。
+const fixtureDir = "../../testdata"
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func loadFixture(t *testing.T, name string, out any) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(fixtureDir, name))
+	if err != nil {
+		t.Fatalf("フィクスチャ %s の読み込みに失敗: %v", name, err)
+	}
+	if err := json.Unmarshal(b, out); err != nil {
+		t.Fatalf("フィクスチャ %s の Unmarshal に失敗: %v", name, err)
+	}
+}
+
+func jst(t *testing.T) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("Asia/Tokyo が解決できません: %v", err)
+	}
+	return loc
+}
+
+// truncate はテストの失敗メッセージを短く保つためのローカルヘルパ。
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+func testApp(t *testing.T, cfg config.Config) *App {
 	t.Helper()
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = "http://127.0.0.1:1/unused-in-tests"
@@ -26,33 +73,34 @@ func testApp(t *testing.T, cfg Config) *App {
 		cfg.SessionBudgetUSD = 5.0
 	}
 	log := discardLogger()
+	opts := clientOptions(cfg)
+	opts.Sleep = func(time.Duration) {} // テストで実時間を待たない（リトライ・ペーシング）
 	return &App{
 		cfg:     cfg,
-		client:  NewClient(cfg, log),
+		client:  xapi.NewClient(opts, log),
 		tmpl:    tmpl,
 		log:     log,
-		session: &SessionSpend{},
+		session: &cost.SessionSpend{},
 		loc:     cfg.Location(),
 		now:     func() time.Time { return time.Date(2026, 8, 13, 9, 0, 0, 0, cfg.Location()) },
 	}
 }
 
-func sampleViewResult(t *testing.T, fixture string) ViewResult {
+func sampleViewResult(t *testing.T, fixture string) view.ViewResult {
 	t.Helper()
-	var resp SearchResponse
+	var resp xapi.SearchResponse
 	loadFixture(t, fixture, &resp)
 	loc := jst(t)
-	v := BuildView(&resp, ViewOptions{
+	v := view.BuildView(&resp, view.ViewOptions{
 		Now:        time.Date(2026, 8, 13, 9, 0, 0, 0, loc),
 		Loc:        loc,
-		Cap:        CapStatus{Usage: 42, Cap: 2000000, Ratio: 0.000021, Known: true, ResetDay: 12},
-		RateLimit:  &RateLimit{Limit: 450, Remaining: 449, Reset: time.Unix(1786000000, 0)},
+		RateLimit:  &xapi.RateLimit{Limit: 450, Remaining: 449, Reset: time.Unix(1786000000, 0)},
 		SpentUSD:   0.05,
 		SessionUSD: 0.055,
 	})
 	v.QueryString = "猫 has:images lang:ja -is:retweet"
-	v.QueryRunes, v.QueryBytes = QueryLength(v.QueryString)
-	v.QueryLimit = QueryLimitRecent
+	v.QueryRunes, v.QueryBytes = query.QueryLength(v.QueryString)
+	v.QueryLimit = query.QueryLimitRecent
 	v.EndpointName = "直近7日"
 	v.MaxResults = 10
 	v.StartDisplay = "2026-08-06 00:00"
@@ -62,18 +110,18 @@ func sampleViewResult(t *testing.T, fixture string) ViewResult {
 
 // TestRenderTemplates は全テンプレートを代表的なデータで描画し、エラーが出ないことを確認する。
 func TestRenderTemplates(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
-	cap := CapStatus{Usage: 42, Cap: 2000000, Known: true, ResetDay: 12}
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
+	cap := cost.CapStatus{Usage: 42, Cap: 2000000, Known: true, ResetDay: 12}
 
 	t.Run("form.html", func(t *testing.T) {
 		p := FormPage{
-			Page:           app.page("検索", cap, EndpointRecent),
-			Form:           SearchForm{MaxResults: 10, Endpoint: "recent"},
+			Page:           app.page("検索", cap, xapi.EndpointRecent),
+			Form:           query.SearchForm{MaxResults: 10, Endpoint: "recent"},
 			MaxOptions:     maxOptionsFor(100),
 			LangOptions:    langOptions,
 			MaxCost:        0.05,
-			StandaloneOps:  StandaloneOperators,
-			ConjunctionOps: ConjunctionRequiredOperators,
+			StandaloneOps:  query.StandaloneOperators,
+			ConjunctionOps: query.ConjunctionRequiredOperators,
 		}
 		out := mustRender(t, app, "form.html", p)
 		for _, want := range []string{
@@ -100,8 +148,8 @@ func TestRenderTemplates(t *testing.T) {
 
 	t.Run("form.html（エラー・警告表示）", func(t *testing.T) {
 		p := FormPage{
-			Page:        app.page("検索", cap, EndpointRecent),
-			Form:        SearchForm{HasImages: true, MaxResults: 10, Endpoint: "recent"},
+			Page:        app.page("検索", cap, xapi.EndpointRecent),
+			Form:        query.SearchForm{HasImages: true, MaxResults: 10, Endpoint: "recent"},
 			Errors:      []string{"[V01] 画像付きだけでは検索できません。"},
 			Warnings:    []string{"[V07] 終了日時を調整しました。"},
 			MaxOptions:  maxOptionsFor(100),
@@ -114,15 +162,15 @@ func TestRenderTemplates(t *testing.T) {
 	})
 
 	t.Run("estimate.html", func(t *testing.T) {
-		var counts CountsResponse
+		var counts xapi.CountsResponse
 		loadFixture(t, "counts_recent.json", &counts)
-		est := EstimateSearch(counts.Meta.TotalPostCount, 10)
+		est := cost.EstimateSearch(counts.Meta.TotalPostCount, 10)
 		est.Granularity = "day"
 		p := EstimatePage{
-			Page:          app.page("見積り", cap, EndpointRecent),
-			Form:          SearchForm{Keywords: "猫", MaxResults: 10, Endpoint: "recent"},
+			Page:          app.page("見積り", cap, xapi.EndpointRecent),
+			Form:          query.SearchForm{Keywords: "猫", MaxResults: 10, Endpoint: "recent"},
 			Query:         "猫 has:images lang:ja -is:retweet",
-			QueryLimit:    QueryLimitRecent,
+			QueryLimit:    query.QueryLimitRecent,
 			EndpointName:  "直近7日",
 			StartDisplay:  "2026-08-06 00:00",
 			EndDisplay:    "2026-08-13 09:00",
@@ -138,7 +186,7 @@ func TestRenderTemplates(t *testing.T) {
 			ReestimateURL: "/search?kw=%E7%8C%AB&mode=estimate",
 			FormURL:       "/?kw=%E7%8C%AB",
 		}
-		p.QueryRunes, p.QueryBytes = QueryLength(p.Query)
+		p.QueryRunes, p.QueryBytes = query.QueryLength(p.Query)
 		out := mustRender(t, app, "estimate.html", p)
 		for _, want := range []string{"10,000", "この条件で検索する", "文字", "バイト", "bucket-bar"} {
 			if !strings.Contains(out, want) {
@@ -152,10 +200,10 @@ func TestRenderTemplates(t *testing.T) {
 
 	t.Run("estimate.html（ゲートで実行不可）", func(t *testing.T) {
 		p := EstimatePage{
-			Page:       app.page("見積り", CapStatus{Usage: 1960000, Cap: 2000000, Ratio: 0.98, Level: CapBlock, Known: true, ResetDay: 12}, EndpointRecent),
+			Page:       app.page("見積り", cost.CapStatus{Usage: 1960000, Cap: 2000000, Ratio: 0.98, Level: cost.CapBlock, Known: true, ResetDay: 12}, xapi.EndpointRecent),
 			Query:      "猫",
-			QueryLimit: QueryLimitRecent,
-			Est:        EstimateSearch(100, 10),
+			QueryLimit: query.QueryLimitRecent,
+			Est:        cost.EstimateSearch(100, 10),
 			Allowed:    false,
 			GateReason: "月次上限の 98.0% を消費しているため実行を停止しました。",
 			FormURL:    "/",
@@ -180,13 +228,13 @@ func TestRenderTemplates(t *testing.T) {
 		} {
 			v := sampleViewResult(t, fixture)
 			p := ResultsPage{
-				Page:           app.page("検索結果", cap, EndpointRecent),
+				Page:           app.page("検索結果", cap, xapi.EndpointRecent),
 				Result:         v,
 				NextURL:        "/search?kw=x&mode=execute&token=abc",
 				NextCost:       0.05,
 				FormURL:        "/?kw=x",
 				EstimateURL:    "/search?kw=x&mode=estimate",
-				EmptyHints:     emptyHints(SearchForm{}),
+				EmptyHints:     emptyHints(query.SearchForm{}),
 				RateLimitReset: "12:34:56",
 			}
 			out := mustRender(t, app, "results.html", p)
@@ -202,10 +250,10 @@ func TestRenderTemplates(t *testing.T) {
 	t.Run("results.html（0 件）", func(t *testing.T) {
 		v := sampleViewResult(t, "search_recent_empty.json")
 		p := ResultsPage{
-			Page:       app.page("検索結果", cap, EndpointRecent),
+			Page:       app.page("検索結果", cap, xapi.EndpointRecent),
 			Result:     v,
 			FormURL:    "/",
-			EmptyHints: emptyHints(SearchForm{Lang: "ja", HasImages: true}),
+			EmptyHints: emptyHints(query.SearchForm{Lang: "ja", HasImages: true}),
 		}
 		out := mustRender(t, app, "results.html", p)
 		if !strings.Contains(out, "0 件でした") {
@@ -219,7 +267,7 @@ func TestRenderTemplates(t *testing.T) {
 	t.Run("results.html（ページングがゲートで無効）", func(t *testing.T) {
 		v := sampleViewResult(t, "search_recent_photos.json")
 		p := ResultsPage{
-			Page:          app.page("検索結果", cap, EndpointRecent),
+			Page:          app.page("検索結果", cap, xapi.EndpointRecent),
 			Result:        v,
 			NextURL:       "/search?mode=execute&token=abc",
 			PagingBlocked: true,
@@ -236,15 +284,15 @@ func TestRenderTemplates(t *testing.T) {
 	})
 
 	t.Run("error.html（全 ErrorKind）", func(t *testing.T) {
-		kinds := []ErrorKind{
-			KindInvalidQuery, KindUnauthorized, KindForbiddenNotEnrolled, KindForbidden,
-			KindNotFound, KindRateLimited, KindServer, KindNetwork, KindDecode, KindUsageCap,
+		kinds := []xapi.ErrorKind{
+			xapi.KindInvalidQuery, xapi.KindUnauthorized, xapi.KindForbiddenNotEnrolled, xapi.KindForbidden,
+			xapi.KindNotFound, xapi.KindRateLimited, xapi.KindServer, xapi.KindNetwork, xapi.KindDecode, xapi.KindUsageCap,
 		}
 		for _, k := range kinds {
-			ae := &APIError{Kind: k, Status: 400, Title: "Invalid Request", Detail: "詳細", Reason: "client-not-enrolled",
+			ae := &xapi.APIError{Kind: k, Status: 400, Title: "Invalid Request", Detail: "詳細", Reason: "client-not-enrolled",
 				Messages: []string{"errors[].message の内容"}}
 			p := ErrorPage{
-				Page:     app.page("エラー", cap, EndpointRecent),
+				Page:     app.page("エラー", cap, xapi.EndpointRecent),
 				Heading:  k.Title(),
 				Message:  ae.UserMessage(jst(t)),
 				Steps:    errorSteps(k),
@@ -285,7 +333,7 @@ func mustRender(t *testing.T, app *App, name string, data any) string {
 
 // TestNoRawHTML は本文の HTML がエスケープされることを確認する（D-24 / P-TEMPLATE-TEXT）。
 func TestNoRawHTML(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	v := sampleViewResult(t, "search_recent_edge.json")
 
 	found := false
@@ -299,7 +347,7 @@ func TestNoRawHTML(t *testing.T) {
 	}
 
 	out := mustRender(t, app, "results.html", ResultsPage{
-		Page:    app.page("検索結果", CapStatus{}, EndpointRecent),
+		Page:    app.page("検索結果", cost.CapStatus{}, xapi.EndpointRecent),
 		Result:  v,
 		FormURL: "/",
 	})
@@ -313,17 +361,16 @@ func TestNoRawHTML(t *testing.T) {
 	if strings.Contains(out, "改行<br>") {
 		t.Error("本文を <br> に置換してはいけない")
 	}
-	if !strings.Contains(out, "white-space") == false {
-		_ = out // style.css 側の責務
-	}
+	// 改行の表現は style.css の white-space: pre-wrap が担うため、テンプレート側は
+	// 素の本文をそのまま出す。CSS 側の存在は TestStyleSheetInvariants で確認する。
 }
 
 // TestDisplayRequirementsPresence は表示要件の必須要素が出力に含まれることを確認する。
 func TestDisplayRequirementsPresence(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	v := sampleViewResult(t, "search_recent_photos.json")
 	out := mustRender(t, app, "results.html", ResultsPage{
-		Page:    app.page("検索結果", CapStatus{}, EndpointRecent),
+		Page:    app.page("検索結果", cost.CapStatus{}, xapi.EndpointRecent),
 		Result:  v,
 		FormURL: "/",
 	})
@@ -342,7 +389,7 @@ func TestDisplayRequirementsPresence(t *testing.T) {
 		}
 	}
 	// 投稿者不明でもカードを描画し、プレースホルダを出す。
-	if !strings.Contains(out, unknownAuthorName) {
+	if !strings.Contains(out, view.UnknownAuthorName) {
 		t.Error("投稿者不明のプレースホルダが出ていない")
 	}
 	if !strings.Contains(out, "削除済み・非公開アカウントの可能性") {
@@ -359,7 +406,7 @@ func TestDisplayRequirementsPresence(t *testing.T) {
 
 // TestHandlersFixtureMode はフィクスチャモードで全画面を一巡できることを確認する（API 呼び出し 0 回）。
 func TestHandlersFixtureMode(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	router := newRouter(app)
 
 	get := func(t *testing.T, target string) *httptest.ResponseRecorder {
@@ -465,7 +512,7 @@ func TestHandlersFixtureMode(t *testing.T) {
 	})
 
 	t.Run("フィクスチャモードではセッションコストが増えない", func(t *testing.T) {
-		app2 := testApp(t, Config{FixtureDir: "testdata"})
+		app2 := testApp(t, config.Config{FixtureDir: fixtureDir})
 		r2 := newRouter(app2)
 		for _, target := range []string{
 			"/search?kw=%E7%8C%AB&mode=estimate",
@@ -532,8 +579,7 @@ func TestErrorPages(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			app := testApp(t, Config{BearerToken: secret, APIBaseURL: srv.URL})
-			app.client.sleep = func(time.Duration) {}
+			app := testApp(t, config.Config{BearerToken: secret, APIBaseURL: srv.URL})
 			router := newRouter(app)
 
 			req := httptest.NewRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=execute", nil)
@@ -566,7 +612,7 @@ func TestErrorPages(t *testing.T) {
 
 // TestFormRoundTrip はフォーム → URL → フォームの往復が壊れないことを確認する（D-23）。
 func TestFormRoundTrip(t *testing.T) {
-	in := SearchForm{
+	in := query.SearchForm{
 		Keywords: "猫 (犬 OR 鳥)", ExcludeWords: "速報", OrWords: "猫 犬", ExactPhrase: "機械学習 入門",
 		Hashtag: "#東京", FromUser: "nasa", ToUser: "spacex", MentionUser: "x", RetweetsOf: "nasa",
 		ListID: "123", ReplyMode: "only", ConversationID: "456", InReplyToPostID: "789",
@@ -609,7 +655,7 @@ func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	app := testApp(t, Config{BearerToken: "t", APIBaseURL: srv.URL, SessionBudgetUSD: 0.001})
+	app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL, SessionBudgetUSD: 0.001})
 	router := newRouter(app)
 
 	// セッション予算 $0.001 では max_results=10（最大 $0.15）が通らない。
@@ -628,6 +674,51 @@ func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 	}
 }
 
+// TestEstimateChargesCountsOnlyOnSuccess は counts の課金計上が成功時のみ行われることを
+// 確認する。リソースを返さない 400 / 429 は無課金（README のコスト表）。
+// 失敗時も計上していた不具合の回帰テスト。「常に計上しない」という誤修正でも通らないよう、
+// 成功時に計上されることも同時に固定する。
+func TestEstimateChargesCountsOnlyOnSuccess(t *testing.T) {
+	newApp := func(t *testing.T, status int, body string) (*App, http.Handler) {
+		t.Helper()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasPrefix(r.URL.Path, "/tweets/counts/"):
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(body))
+			case strings.HasPrefix(r.URL.Path, "/usage/"):
+				_, _ = w.Write([]byte(`{"data":{"project_cap":"2000000","project_usage":"0","cap_reset_day":12}}`))
+			default:
+				_, _ = w.Write([]byte(`{"data":[],"meta":{"result_count":0}}`))
+			}
+		}))
+		t.Cleanup(srv.Close)
+		app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
+		return app, newRouter(app)
+	}
+	estimate := func(h http.Handler) {
+		req := httptest.NewRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=estimate", nil)
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	t.Run("429 で失敗した counts は課金しない", func(t *testing.T) {
+		app, h := newApp(t, http.StatusTooManyRequests, `{"title":"Too Many Requests","status":429}`)
+		estimate(h)
+		if got := app.session.Total(); got != 0 {
+			t.Errorf("失敗した counts を課金してはいけない: got=%v want=0", got)
+		}
+	})
+
+	t.Run("成功した counts は計上する", func(t *testing.T) {
+		app, h := newApp(t, http.StatusOK, `{"data":[],"meta":{"total_tweet_count":0}}`)
+		estimate(h)
+		want := cost.CountsCostFor(xapi.EndpointRecent)
+		if got := app.session.Total(); got != want {
+			t.Errorf("成功した counts は計上する: got=%v want=%v", got, want)
+		}
+	})
+}
+
 func TestExecuteSearchDispatch(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -636,14 +727,13 @@ func TestExecuteSearchDispatch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	app := testApp(t, Config{BearerToken: "t", APIBaseURL: srv.URL})
-	app.client.pacer.sleep = func(time.Duration) {}
+	app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
 
-	p := SearchParams{Query: "猫", MaxResults: 10, Endpoint: EndpointRecent}
+	p := xapi.SearchParams{Query: "猫", MaxResults: 10, Endpoint: xapi.EndpointRecent}
 	if _, _, err := app.executeSearch(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
-	p.Endpoint = EndpointAll
+	p.Endpoint = xapi.EndpointAll
 	if _, _, err := app.executeSearch(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
@@ -659,10 +749,10 @@ func TestExecuteSearchDispatch(t *testing.T) {
 // いずれもプロフィールへリンクする」「タイムスタンプの隣に X で表示を置く」を検証する。
 // 原文（developer.x.com/en/developer-terms/display-requirements・2026-08-13 に取得成功）に基づく。
 func TestDisplayRequirementsLinks(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	v := sampleViewResult(t, "search_recent_photos.json")
 	out := mustRender(t, app, "results.html", ResultsPage{
-		Page:    app.page("検索結果", CapStatus{}, EndpointRecent),
+		Page:    app.page("検索結果", cost.CapStatus{}, xapi.EndpointRecent),
 		Result:  v,
 		FormURL: "/",
 	})
@@ -701,10 +791,10 @@ func TestDisplayRequirementsLinks(t *testing.T) {
 // TestHeaderShowsUsageCounts はヘッダに月次 cap の実数が出ることを確認する。
 // パーセント表示だけだと消費が少ないとき 0.0% になり、実 API 実行前後の増加が読み取れない。
 func TestHeaderShowsUsageCounts(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	p := FormPage{
-		Page:        app.page("検索", CapStatus{Usage: 62, Cap: 2000000, Ratio: 0.000031, Known: true, ResetDay: 12}, EndpointRecent),
-		Form:        SearchForm{MaxResults: 10, Endpoint: "recent"},
+		Page:        app.page("検索", cost.CapStatus{Usage: 62, Cap: 2000000, Ratio: 0.000031, Known: true, ResetDay: 12}, xapi.EndpointRecent),
+		Form:        query.SearchForm{MaxResults: 10, Endpoint: "recent"},
 		MaxOptions:  maxOptionsFor(100),
 		LangOptions: langOptions,
 	}
@@ -722,11 +812,11 @@ func resultsHTML(t *testing.T, app *App, fixture string) string {
 	t.Helper()
 	v := sampleViewResult(t, fixture)
 	out := mustRender(t, app, "results.html", ResultsPage{
-		Page:        app.page("検索結果", CapStatus{}, EndpointRecent),
+		Page:        app.page("検索結果", cost.CapStatus{}, xapi.EndpointRecent),
 		Result:      v,
 		FormURL:     "/",
 		EstimateURL: "/search?mode=estimate",
-		EmptyHints:  emptyHints(SearchForm{}),
+		EmptyHints:  emptyHints(query.SearchForm{}),
 	})
 	return stripScripts(out)
 }
@@ -755,7 +845,7 @@ func stripScripts(html string) string {
 
 // TestPostListMarkup は一覧ラッパとコントロールの構造を固定する（D-40 / D-41 / D-47 / D-56）。
 func TestPostListMarkup(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	v := sampleViewResult(t, "search_recent_edge.json")
 	out := resultsHTML(t, app, "search_recent_edge.json")
 
@@ -854,7 +944,7 @@ func TestPostListMarkup(t *testing.T) {
 
 // TestFilterDataAttributes はカードの data-f-* 属性を確認する（D-37 / D-48）。
 func TestFilterDataAttributes(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 
 	t.Run("エッジフィクスチャ", func(t *testing.T) {
 		v := sampleViewResult(t, "search_recent_edge.json")
@@ -909,13 +999,13 @@ func TestFilterDataAttributes(t *testing.T) {
 
 // TestZeroResultsHasNoControls は 0 件のときにコントロールを出さないことを確認する（D-56）。
 func TestZeroResultsHasNoControls(t *testing.T) {
-	app := testApp(t, Config{FixtureDir: "testdata"})
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	v := sampleViewResult(t, "search_recent_empty.json")
 	out := stripScripts(mustRender(t, app, "results.html", ResultsPage{
-		Page:       app.page("検索結果", CapStatus{}, EndpointRecent),
+		Page:       app.page("検索結果", cost.CapStatus{}, xapi.EndpointRecent),
 		Result:     v,
 		FormURL:    "/",
-		EmptyHints: emptyHints(SearchForm{Lang: "ja", HasImages: true}),
+		EmptyHints: emptyHints(query.SearchForm{Lang: "ja", HasImages: true}),
 	}))
 
 	for _, bad := range []string{"post-list", "list-controls", "filter-count", "filter-empty", "件表示中", "表示列数"} {
@@ -952,6 +1042,9 @@ func TestStyleSheetInvariants(t *testing.T) {
 		".filter-count",
 		"@media (max-width: 719px)",
 		"@media (max-width: 1039px)",
+		// 本文の改行は <br> 置換ではなく CSS で表現する（D-24）。
+		// テンプレート側が素の本文を出す前提なので、この宣言が消えると改行が失われる。
+		"white-space: pre-wrap",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("style.css に %q が無い", want)
