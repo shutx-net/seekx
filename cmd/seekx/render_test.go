@@ -793,6 +793,41 @@ func TestStickyHeader(t *testing.T) {
 	if !strings.Contains(sticky, "max-height: calc(100vh") || !strings.Contains(sticky, "overflow-y: auto") {
 		t.Error("固定した操作部は max-height + overflow-y で画面内に収める")
 	}
+
+	// ラチェット防止（#7）。JS が --header-h に実測値を書くため、min-height が同じ変数を
+	// 読むとヘッダの高さが増える方向にしか動かなくなる。
+	if strings.Contains(sticky, "min-height: var(--header-h)") {
+		t.Error("min-height: var(--header-h) は書かない（JS の実測値と循環してヘッダが縮まなくなる）")
+	}
+}
+
+// TestHeaderHeightIsMeasured は --header-h が固定値ではなく JS の実測値で
+// 上書きされることを確認する（#7）。固定値だとヘッダが折り返した時点で
+// 隙間が空くか、操作部がヘッダの下に潜る。
+func TestHeaderHeightIsMeasured(t *testing.T) {
+	b, err := templatesFS.ReadFile("templates/layout.html")
+	if err != nil {
+		t.Fatalf("layout.html を読めない: %v", err)
+	}
+	html := string(b)
+
+	// 文字列の存在だけを見ると、window.ResizeObserver というガードにマッチして
+	// observer が接続されていなくても通ってしまう。呼び出しの形まで固定する。
+	for _, want := range []string{
+		`setProperty("--header-h"`,                       // 実測値を書き込んでいる
+		"header.offsetHeight",                            // 実際の描画高さを読んでいる
+		"new ResizeObserver(syncHeaderH).observe(header", // 折り返しや内容変化に追従する
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("%q が無い（ヘッダ高さが実測されていない）", want)
+		}
+	}
+	// 計測は結果画面だけで足りる。IIFE 冒頭の早期 return より後に置くこと。
+	iRet := strings.Index(html, "if (!list || !controls)")
+	iSync := strings.Index(html, `setProperty("--header-h"`)
+	if iRet < 0 || iSync < 0 || iSync < iRet {
+		t.Error("高さの計測は #post-list / #list-controls の早期 return より後に置く")
+	}
 }
 
 // TestColumnRadioStaysFocusable は列数のラジオを隠す手段が
@@ -1242,7 +1277,6 @@ func TestStyleSheetInvariants(t *testing.T) {
 		// 上部固定。--header-h / min-height / top の 3 つが揃っていないと、
 		// #list-controls がヘッダの下に潜るか、隙間が空いてカードが透ける。
 		"--header-h:",
-		"min-height: var(--header-h)",
 		"top: var(--header-h)",
 		"@media (min-width: 720px)",
 		// 列数アイコン。読み上げ用テキストと選択・フォーカス表示が揃っていること。
@@ -1378,7 +1412,17 @@ func TestInlineScriptInvariants(t *testing.T) {
 		t.Error("innerHTML を使ってはいけない")
 	}
 
-	// D-55: <script> ブロック内の総行数が 90 以下。
+	// D-55: <script> ブロック内の総行数の上限。
+	//
+	// 90 → 100 に引き上げた（#7）。内訳は syncHeaderH の 5 行。
+	// 引き上げの理由: 固定した操作部の top に渡すヘッダ高さを 44px の固定値で
+	// 置いていたが、ヘッダが折り返すと値がズレて隙間が空くか操作部が潜る。
+	// 実測が正しい解決で、CSS では実現できない。
+	//
+	// この上限は「クライアント側ロジックを最小に保つ」方針の代理指標であって、
+	// 数字自体に意味は無い。JS が正しい道具なら、CSS に押し込むのではなく
+	// ここを更新して理由を書くこと。逆に <script src> で外部ファイルへ逃がして
+	// 計測対象から外すのは方針の回避なので、上の D-35 の検査で塞いでいる。
 	lines := strings.Split(html, "\n")
 	inScript := false
 	count := 0
@@ -1393,8 +1437,8 @@ func TestInlineScriptInvariants(t *testing.T) {
 			inScript = false
 		}
 	}
-	if count > 90 {
-		t.Errorf("<script> ブロックの行数 = %d, want <= 90（D-55）", count)
+	if count > 100 {
+		t.Errorf("<script> ブロックの行数 = %d, want <= 100（D-55）", count)
 	}
-	t.Logf("インライン JS の行数: %d / 90", count)
+	t.Logf("インライン JS の行数: %d / 100", count)
 }
