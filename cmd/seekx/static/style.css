@@ -547,9 +547,15 @@ a.author-name:hover { text-decoration: underline; }
    この 2 つは DOM 上で隣接していない（間に .query-box / .meta-list / .notice が入る）。
    CSS には「直前の sticky 要素の下に貼り付く」という指定が無いため、
    #list-controls の top にヘッダの高さを渡す必要がある。
-   高さを実測値で推測すると内容が変わった瞬間に破綻するので、ヘッダ側に
-   min-height を与えて --header-h と一致させ、値が 1 箇所で決まるようにしている。
-   【--header-h / min-height / top の 3 つは必ずセットで扱うこと。】 */
+   --header-h は【JS がヘッダの実高さを実測して上書きする】（layout.html の syncHeaderH）。
+   ここの値は JS が走る前の初期値にすぎず、位置がズレたまま一瞬描画されるのを防ぐためだけにある。
+
+   【min-height: var(--header-h) を書いてはいけない。】
+   JS が同じ変数へ実測値を書くため、min-height がそれを読むとラチェットになる:
+   ヘッダが折り返して 65px になると min-height: 65px が焼き付き、内容が減って
+   自然高が戻っても縮まなくなる（高さが増える方向にしか動かない）。
+   なお #list-controls は JS が hidden を外すまで表示されないので、JS 無効時に
+   この値が使われる場面は無く、フォールバックとしての min-height も不要。 */
 :root { --header-h: 44px; }
 
 /* 狭い画面では固定しない。3 行分を固定すると投稿を読む領域が残らない。 */
@@ -558,8 +564,7 @@ a.author-name:hover { text-decoration: underline; }
     position: sticky;
     top: 0;
     z-index: 20;
-    min-height: var(--header-h); /* --header-h と一致させる（上のコメント参照） */
-    background: var(--bg);       /* 透明だと下のカードが透ける */
+    background: var(--bg); /* 透明だと下のカードが透ける */
   }
 
   .list-controls {

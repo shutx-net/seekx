@@ -60,6 +60,12 @@ document.addEventListener("click", function (ev) {
     document.documentElement.removeAttribute("data-cols");
     return;
   }
+  var header = document.querySelector(".site-header");
+  function syncHeaderH() { // 固定した操作部の top に渡すヘッダの実高さ。CSS 側の値は初期値のみ
+    document.documentElement.style.setProperty("--header-h", header.offsetHeight + "px");
+  }
+  if (header && window.ResizeObserver) new ResizeObserver(syncHeaderH).observe(header); // observe() は初回も発火する
+  else if (header) syncHeaderH();
   var cards = list.querySelectorAll(".post"); // DOM は変化しないので 1 度だけ取得（A-15）
   var countEl = document.getElementById("filter-count"), emptyEl = document.getElementById("filter-empty"), badgeEl = document.getElementById("filter-summary-count");
   var flagBoxes = [["f-no-reply", "reply"], ["f-no-repost", "repost"], ["f-no-quote", "quote"],
