@@ -35,6 +35,18 @@ devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.js
 devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go test ./...
 ```
 
+## CI
+
+`.github/workflows/ci.yml` が push（main）と pull request で同じ検証を回します。
+
+- `go build ./...` / `go vet ./...` / `gofmt -l .`（出力があれば失敗）/ `go test -race ./...`
+- Go は `1.22`（go.mod が宣言している下限）と `stable` の 2 つで実行します。
+  手元の新しい Go でしか通らないコードを防ぐためです。
+- `-race` は外せません。Bearer Token の差し替えなど実行時に可変な状態があり、
+  競合はこれでしか検出できません。
+
+検証コマンドを増減するときは、この節と `ci.yml` の両方を更新してください。
+
 ## パッケージ構成
 
 エントリポイントは `cmd/seekx`、実装は `internal/` 配下です。依存の向きは一方向で、

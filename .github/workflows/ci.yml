@@ -1,0 +1,68 @@
+# CI は AGENTS.md に書いてある検証コマンドをそのまま回す。
+# ローカルでは devcontainer 経由で実行するが、中身は同じ go build / go vet / gofmt / go test。
+# 検証内容を増やすときは AGENTS.md 側も併せて更新すること。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同じ PR に続けて push したとき、走り終えていない古い実行を打ち切る。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 読み取りのみ。CI からリポジトリへ書き込む処理は無い。
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      # 片方が落ちてももう片方の結果を見たいので打ち切らない。
+      fail-fast: false
+      matrix:
+        # 1.22 は go.mod が宣言している下限。stable は devcontainer が使う
+        # mcr.microsoft.com/devcontainers/go（タグ無し＝最新）に相当する。
+        # 両方を通すことで「手元の新しい Go では通るが、宣言した下限では
+        # 標準ライブラリの API が無くて壊れる」を防ぐ。
+        go: ["1.22", "stable"]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          # 外部依存が無く go.sum も存在しないため、キャッシュしても得るものが無い。
+          cache: false
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # gofmt -l は整形が必要なファイル名を並べるだけで、終了コードは 0 のまま。
+      # 出力が空でないことをここで明示的に失敗に変える。
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt がかかっていないファイルがあります:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # テストは実 API を叩かない（httptest の偽サーバと testdata/ のフィクスチャのみ）。
+      # -race は必須。Bearer Token の差し替えなど実行時に可変な状態があり、
+      # 競合はこれでしか落ちない。
+      - name: go test
+        run: go test -race ./...
