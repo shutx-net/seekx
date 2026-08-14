@@ -26,6 +26,11 @@ import (
 	"strings"
 	"time"
 
+	// tzdata をバイナリに同梱する（約 410KB）。システムのタイムゾーンデータベースを
+	// 持たない環境（Windows など）では time.LoadLocation が失敗し、config.Location が
+	// UTC を返すため、全時刻表示が黙ってずれる。ホストで直接動かす場合に効く。
+	_ "time/tzdata"
+
 	"github.com/shutx-net/seekx/internal/config"
 	"github.com/shutx-net/seekx/internal/cost"
 	"github.com/shutx-net/seekx/internal/query"
@@ -100,7 +105,12 @@ func main() {
 		"session_budget_usd", cfg.SessionBudgetUSD,
 		"max_results_cap", cfg.MaxResultsCap,
 		"allowed_hosts", strings.Join(cfg.AllowedHosts, ","),
+		"bind", cfg.BindAddr,
 	)
+	// 解決できないまま起動すると全時刻表示が黙って UTC にずれるので、ここで一度警告する。
+	if err := cfg.LocationError(); err != nil {
+		log.Warn("SEEKX_TZ を解決できないため UTC で表示します", "tz", cfg.DisplayTZ, "err", err)
+	}
 	if cfg.FixtureMode() {
 		log.Info("フィクスチャモードです。X API は呼び出されません（課金 0）", "dir", cfg.FixtureDir)
 	}
@@ -120,10 +130,11 @@ func main() {
 		now:     time.Now,
 	}
 
-	// 0.0.0.0 にバインドする。127.0.0.1 はコンテナ外（ホスト）から到達できない（D-08 / P-BIND-0000）。
-	addr := "0.0.0.0:" + cfg.Port
+	// 既定は 0.0.0.0。コンテナ内のループバックはホストから到達できないため（D-08 / P-BIND-0000）。
+	// ホストで直接動かす場合はこの理由が消えるので SEEKX_BIND=127.0.0.1 で絞れる。
+	addr := cfg.ListenAddr()
 	log.Info("listening", "addr", addr,
-		"note", "devcontainer.json の forwardPorts と一致しているか確認してください",
+		"note", "コンテナで動かす場合は devcontainer.json の forwardPorts と一致しているか確認してください",
 		"url", "http://localhost:"+cfg.Port+"/")
 
 	srv := &http.Server{
