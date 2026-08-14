@@ -27,6 +27,15 @@ devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.js
 devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go run ./cmd/seekx
 ```
 
+devcontainer は必須ではありません。外部依存が無くテンプレート・静的アセットは embed 済みなので、
+ホスト上でバイナリを直接動かせます。その場合は `SEEKX_BIND=127.0.0.1` を付けてください
+（既定の `0.0.0.0` はコンテナの事情によるもので、ホストではループバックで届きます）。
+手順は README の「ホストで直接実行する」を参照してください。
+
+```sh
+CGO_ENABLED=0 go build -o seekx ./cmd/seekx && SEEKX_BIND=127.0.0.1 ./seekx
+```
+
 テストは実 API を叩きません。`httptest` の偽サーバと `testdata/` のフィクスチャだけで完結します。
 
 ```sh
