@@ -312,26 +312,9 @@ func TestListenAddr(t *testing.T) {
 }
 
 func TestLoadConfigBindAddr(t *testing.T) {
-	t.Run("既定は 0.0.0.0", func(t *testing.T) {
+	// 既定はループバック。広く開ける側（コンテナ）を明示させる向きにしている。
+	t.Run("既定は 127.0.0.1", func(t *testing.T) {
 		p := writeTempEnv(t, "")
-		t.Setenv("SEEKX_ENV_FILE", p)
-		t.Setenv("SEEKX_FIXTURE_DIR", "testdata")
-		t.Setenv("SEEKX_BIND", "")
-
-		cfg, err := LoadConfig()
-		if err != nil {
-			t.Fatalf("LoadConfig: %v", err)
-		}
-		if cfg.BindAddr != "0.0.0.0" {
-			t.Errorf("BindAddr: got %q, want 0.0.0.0", cfg.BindAddr)
-		}
-		if got := cfg.ListenAddr(); got != "0.0.0.0:"+DefaultPort {
-			t.Errorf("ListenAddr: got %q", got)
-		}
-	})
-
-	t.Run("SEEKX_BIND で絞れる（前後の空白は落とす）", func(t *testing.T) {
-		p := writeTempEnv(t, "SEEKX_BIND=  127.0.0.1  \n")
 		t.Setenv("SEEKX_ENV_FILE", p)
 		t.Setenv("SEEKX_FIXTURE_DIR", "testdata")
 		t.Setenv("SEEKX_BIND", "")
@@ -343,7 +326,71 @@ func TestLoadConfigBindAddr(t *testing.T) {
 		if cfg.BindAddr != "127.0.0.1" {
 			t.Errorf("BindAddr: got %q, want 127.0.0.1", cfg.BindAddr)
 		}
+		if got := cfg.ListenAddr(); got != "127.0.0.1:"+DefaultPort {
+			t.Errorf("ListenAddr: got %q", got)
+		}
+		if !cfg.BindsLoopback() {
+			t.Error("既定はループバックとして扱われるべき")
+		}
 	})
+
+	// devcontainer が containerEnv で渡す経路。
+	t.Run("SEEKX_BIND で広げられる（前後の空白は落とす）", func(t *testing.T) {
+		p := writeTempEnv(t, "SEEKX_BIND=  0.0.0.0  \n")
+		t.Setenv("SEEKX_ENV_FILE", p)
+		t.Setenv("SEEKX_FIXTURE_DIR", "testdata")
+		t.Setenv("SEEKX_BIND", "")
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.BindAddr != "0.0.0.0" {
+			t.Errorf("BindAddr: got %q, want 0.0.0.0", cfg.BindAddr)
+		}
+		if cfg.BindsLoopback() {
+			t.Error("0.0.0.0 はループバックではない")
+		}
+	})
+
+	// 環境変数は .env より優先される（devcontainer の containerEnv がこちら）。
+	t.Run("環境変数が .env より優先される", func(t *testing.T) {
+		p := writeTempEnv(t, "SEEKX_BIND=127.0.0.1\n")
+		t.Setenv("SEEKX_ENV_FILE", p)
+		t.Setenv("SEEKX_FIXTURE_DIR", "testdata")
+		t.Setenv("SEEKX_BIND", "0.0.0.0")
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.BindAddr != "0.0.0.0" {
+			t.Errorf("BindAddr: got %q, want 0.0.0.0", cfg.BindAddr)
+		}
+	})
+}
+
+func TestBindsLoopback(t *testing.T) {
+	cases := []struct {
+		bind string
+		want bool
+	}{
+		{"127.0.0.1", true},
+		{"127.0.0.53", true}, // 127.0.0.0/8 はすべてループバック
+		{"::1", true},
+		{"localhost", true},
+		{"LocalHost", true},
+		{"  127.0.0.1  ", true},
+		{"0.0.0.0", false},
+		{"::", false},
+		{"192.168.1.5", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := (Config{BindAddr: tc.bind}).BindsLoopback(); got != tc.want {
+			t.Errorf("BindsLoopback(%q): got %v, want %v", tc.bind, got, tc.want)
+		}
+	}
 }
 
 // TestLocationError は SEEKX_TZ を解決できるかどうかを検知できることを確認する。

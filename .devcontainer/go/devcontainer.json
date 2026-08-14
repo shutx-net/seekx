@@ -2,5 +2,11 @@
     "name": "Go Dev Container",
     "image": "mcr.microsoft.com/devcontainers/go",
     "forwardPorts": [5050],
-    "appPort": [5050]
+    "appPort": [5050],
+    // seekx の既定バインドは 127.0.0.1（ホストで直接動かす場合を安全側にするため）。
+    // コンテナ内のループバックはホストから到達できないので、ここで 0.0.0.0 に上書きする。
+    // この値を変えたときはコンテナを作り直してください（containerEnv は作成時に適用されます）。
+    "containerEnv": {
+        "SEEKX_BIND": "0.0.0.0"
+    }
 }

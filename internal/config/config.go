@@ -31,10 +31,14 @@ const (
 	defaultDisplayTZ        = "Asia/Tokyo"
 	defaultEnvFile          = ".env"
 
-	// defaultBindAddr はコンテナで動かす前提の既定値（D-08 / P-BIND-0000）。
-	// コンテナ内のループバックはホストから到達できないため 0.0.0.0 が要る。
-	// ホストで直接動かす場合はこの理由が消えるので、SEEKX_BIND=127.0.0.1 で絞れる。
-	defaultBindAddr = "0.0.0.0"
+	// defaultBindAddr はループバックに絞る。安全な側を既定にするため。
+	// ホストで直接動かす場合はこれで届き、LAN からは TCP レベルで到達できない。
+	//
+	// コンテナ内のループバックはホストから到達できないので、devcontainer では
+	// SEEKX_BIND=0.0.0.0 が要る（.devcontainer/go/devcontainer.json の containerEnv
+	// で指定している）。0.0.0.0 を既定としていた D-08 / P-BIND-0000 はここで反転し、
+	// 「広く開けるほうを明示させる」向きに変えている。
+	defaultBindAddr = "127.0.0.1"
 )
 
 // ErrNoBearerToken は BEARER_TOKEN が解決できなかったことを表す。
@@ -45,9 +49,12 @@ var ErrNoBearerToken = errors.New("BEARER_TOKEN が設定されていません")
 
 // DefaultAllowedHosts は Host ヘッダのホスト名として既定で許可する値を返す。
 //
-// サーバは 0.0.0.0 にバインドし（D-08）認証を持たないため、ブラウザ経由の到達を
-// ホスト名で絞る。攻撃者のドメインが 127.0.0.1 へ解決するよう仕込まれても
-// （DNS rebinding）、ブラウザが送る Host ヘッダは攻撃者のドメインのままなので落ちる。
+// サーバは認証を持たないため、ブラウザ経由の到達をホスト名で絞る。
+// 攻撃者のドメインが 127.0.0.1 へ解決するよう仕込まれても（DNS rebinding）、
+// ブラウザが送る Host ヘッダは攻撃者のドメインのままなので落ちる。
+//
+// この検証はバインド先に関わらず必要。DNS rebinding が狙うのは 127.0.0.1 なので、
+// ループバックに絞っても防げない（バインドで防げるのは LAN からの直接アクセスの側）。
 //
 // 呼び出しごとに新しいスライスを返す（パッケージ変数だと呼び出し側から書き換えられる）。
 func DefaultAllowedHosts() []string {
@@ -141,6 +148,17 @@ func (c Config) LocationError() error {
 // net.JoinHostPort を通すのは、IPv6 リテラル（"::1"）を角括弧で囲む必要があるため。
 func (c Config) ListenAddr() string {
 	return net.JoinHostPort(c.BindAddr, c.Port)
+}
+
+// BindsLoopback はバインド先がループバックかどうかを返す。
+// コンテナ内でループバックに絞るとホストのブラウザから到達できず、原因が分かりにくい。
+// 起動時にその案内を出すかどうかの判定に使う。
+func (c Config) BindsLoopback() bool {
+	if strings.EqualFold(strings.TrimSpace(c.BindAddr), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.TrimSpace(c.BindAddr))
+	return ip != nil && ip.IsLoopback()
 }
 
 // resolvePort は PORT 環境変数を優先し、未設定なら DefaultPort を返す（D-07）。

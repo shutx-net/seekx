@@ -27,13 +27,17 @@ devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.js
 devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go run ./cmd/seekx
 ```
 
+バインドの既定は `127.0.0.1`（ループバック）です。コンテナ内のループバックはホストから
+到達できないため、`.devcontainer/go/devcontainer.json` が `containerEnv` で
+`SEEKX_BIND=0.0.0.0` を渡しています。**この値を変えたときはコンテナを作り直してください**
+（`containerEnv` は作成時に適用されます）。
+
 devcontainer は必須ではありません。外部依存が無くテンプレート・静的アセットは embed 済みなので、
-ホスト上でバイナリを直接動かせます。その場合は `SEEKX_BIND=127.0.0.1` を付けてください
-（既定の `0.0.0.0` はコンテナの事情によるもので、ホストではループバックで届きます）。
+ホスト上でバイナリを直接動かせます。既定がループバックなので追加の指定は要りません。
 手順は README の「ホストで直接実行する」を参照してください。
 
 ```sh
-CGO_ENABLED=0 go build -o seekx ./cmd/seekx && SEEKX_BIND=127.0.0.1 ./seekx
+CGO_ENABLED=0 go build -o seekx ./cmd/seekx && ./seekx
 ```
 
 テストは実 API を叩きません。`httptest` の偽サーバと `testdata/` のフィクスチャだけで完結します。

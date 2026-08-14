@@ -130,12 +130,17 @@ func main() {
 		now:     time.Now,
 	}
 
-	// 既定は 0.0.0.0。コンテナ内のループバックはホストから到達できないため（D-08 / P-BIND-0000）。
-	// ホストで直接動かす場合はこの理由が消えるので SEEKX_BIND=127.0.0.1 で絞れる。
+	// 既定はループバック。広く開けるほう（コンテナ）を明示させる向きにしている。
+	// devcontainer は containerEnv で SEEKX_BIND=0.0.0.0 を渡す。
 	addr := cfg.ListenAddr()
 	log.Info("listening", "addr", addr,
 		"note", "コンテナで動かす場合は devcontainer.json の forwardPorts と一致しているか確認してください",
 		"url", "http://localhost:"+cfg.Port+"/")
+	// コンテナ内でループバックに絞るとホストのブラウザから到達できない。
+	// 症状（ページが開かない）から原因にたどり着けるよう、ここで案内しておく。
+	if cfg.BindsLoopback() {
+		log.Info("ループバックにのみバインドしています。コンテナで動かしていてホストのブラウザから開けない場合は SEEKX_BIND=0.0.0.0 を指定してください")
+	}
 
 	srv := &http.Server{
 		Addr:              addr,
