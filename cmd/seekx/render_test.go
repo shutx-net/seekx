@@ -1583,6 +1583,10 @@ func TestStyleSheetInvariants(t *testing.T) {
 		".filter-details",
 		// 件数バッジの表示制御は :empty に依存している。消えるとバッジが常時出る。
 		".filter-badge:empty { display: none; }",
+		// 絞り込みの数値欄はサイドバー幅で 2 列固定。共用の .grid2 は auto-fit のまま
+		// 残すこと（直接変えると検索フォームの入力欄まで巻き添えになる）。
+		".list-controls .grid2 {",
+		"repeat(auto-fit, minmax(180px, 1fr))",
 		// summary に display: flex を当てるとネイティブの開閉マーカーが消えるため、
 		// ＋ / − を ::before で自前描画している。消えると開閉できることが分からなくなる。
 		".filter-details > summary::before",

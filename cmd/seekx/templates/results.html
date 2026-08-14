@@ -79,20 +79,24 @@
         <summary aria-describedby="filter-scope-note">このページの絞り込み（再検索なし）<span
           class="filter-badge" id="filter-summary-count"></span></summary>
         <div class="grid2">
+          {{/* ラベルは 2 列に収まる長さに詰めてある。「本文の」「枚数」といった限定が
+               落ちるぶんは aria-describedby と下の hint が補う。 */}}
           <div class="field">
-            <label for="f-runes-min">本文の文字数（最小）</label>
-            <input type="number" id="f-runes-min" min="0" step="1" inputmode="numeric" placeholder="指定なし">
+            <label for="f-runes-min">最小文字数</label>
+            <input type="number" id="f-runes-min" min="0" step="1" inputmode="numeric" placeholder="指定なし"
+              aria-describedby="filter-runes-note">
           </div>
           <div class="field">
-            <label for="f-runes-max">本文の文字数（最大）</label>
-            <input type="number" id="f-runes-max" min="0" step="1" inputmode="numeric" placeholder="指定なし">
+            <label for="f-runes-max">最大文字数</label>
+            <input type="number" id="f-runes-max" min="0" step="1" inputmode="numeric" placeholder="指定なし"
+              aria-describedby="filter-runes-note">
           </div>
           <div class="field">
-            <label for="f-media-min">メディアの枚数（最小）</label>
+            <label for="f-media-min">最小メディア数</label>
             <input type="number" id="f-media-min" min="0" max="10" step="1" inputmode="numeric" placeholder="指定なし">
           </div>
           <div class="field">
-            <label for="f-likes-min">いいねの最小数</label>
+            <label for="f-likes-min">最小いいね数</label>
             <input type="number" id="f-likes-min" min="0" step="1" inputmode="numeric" placeholder="指定なし"
               aria-describedby="f-likes-note">
           </div>

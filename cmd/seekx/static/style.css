@@ -679,6 +679,16 @@ a.author-name:hover { text-decoration: underline; }
   padding: 8px var(--gap) var(--gap);
 }
 
+/* .grid2 のグローバル既定は repeat(auto-fit, minmax(180px, 1fr))。サイドバー幅では
+   2 列に必要な 370px にわずかに足りず（内部スクロールバーが出るとさらに数 px 減る）、
+   1 列へ落ちて縦に間延びする。ここでは列数を 2 で固定する。ラベルを短くしてあるので
+   積んだ狭い画面でも 2 列で収まる。
+   検索フォームと共用のクラスなので、.list-controls の中だけに閉じること
+   （.grid2 を直接変えるとフォーム画面の入力欄まで巻き添えになる）。 */
+.list-controls .grid2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 /* input[type="number"] のグローバル既定は width: 100%。4 桁の数値に全幅は不要。 */
 .list-controls input[type="number"] {
   width: 7em;
