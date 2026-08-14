@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -30,6 +31,57 @@ const (
 	defaultEnvFile          = ".env"
 )
 
+// DefaultAllowedHosts は Host ヘッダのホスト名として既定で許可する値を返す。
+//
+// サーバは 0.0.0.0 にバインドし（D-08）認証を持たないため、ブラウザ経由の到達を
+// ホスト名で絞る。攻撃者のドメインが 127.0.0.1 へ解決するよう仕込まれても
+// （DNS rebinding）、ブラウザが送る Host ヘッダは攻撃者のドメインのままなので落ちる。
+//
+// 呼び出しごとに新しいスライスを返す（パッケージ変数だと呼び出し側から書き換えられる）。
+func DefaultAllowedHosts() []string {
+	return []string{"localhost", "127.0.0.1", "::1"}
+}
+
+// NormalizeHostname は Host ヘッダや設定値からホスト名部分だけを取り出し、
+// 比較可能な形（ポートなし・角括弧なし・末尾ドットなし・小文字）に正規化する。
+//
+// 許可リスト側と検証側で正規化がずれると許可リストを迂回できてしまうため、
+// 両者がこの 1 つの関数を共有する（cmd/seekx の Host 検証もこれを使う）。
+func NormalizeHostname(host string) string {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return ""
+	}
+	if hostOnly, _, err := net.SplitHostPort(h); err == nil {
+		h = hostOnly
+	} else {
+		// ポートを伴わない IPv6 リテラル（"[::1]" や素の "::1"）はここに来る。
+		h = strings.TrimSuffix(strings.TrimPrefix(h, "["), "]")
+	}
+	h = strings.TrimSuffix(h, ".") // FQDN 形式の "localhost."
+	return strings.ToLower(h)
+}
+
+// parseAllowedHosts は SEEKX_ALLOWED_HOSTS（カンマ区切り）を既定値に追加する。
+// 既定値を置き換えるのではなく追加するのは、localhost を失う設定ミスを防ぐため。
+// ポート番号が書かれていても無視する（比較はホスト名だけで行う）。
+func parseAllowedHosts(raw string) []string {
+	hosts := DefaultAllowedHosts()
+	seen := make(map[string]bool, len(hosts))
+	for _, h := range hosts {
+		seen[h] = true
+	}
+	for _, part := range strings.Split(raw, ",") {
+		h := NormalizeHostname(part)
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		hosts = append(hosts, h)
+	}
+	return hosts
+}
+
 // Config はプロセス全体の設定。環境変数と .env から解決する（D-09）。
 type Config struct {
 	Port             string  // PORT、既定 DefaultPort
@@ -44,6 +96,10 @@ type Config struct {
 	DisplayTZ        string  // SEEKX_TZ、既定 Asia/Tokyo
 	EnvFile          string  // SEEKX_ENV_FILE、既定 .env
 	LogLevel         string  // SEEKX_LOG_LEVEL、既定 info
+
+	// AllowedHosts は Host ヘッダとして受け付けるホスト名。
+	// DefaultAllowedHosts に SEEKX_ALLOWED_HOSTS を追加したもの。
+	AllowedHosts []string
 }
 
 // FixtureMode はフィクスチャモード（課金ゼロ）かどうかを返す（D-22）。
@@ -180,6 +236,7 @@ func LoadConfig() (Config, error) {
 		DisplayTZ:        lookupEnv(dot, "SEEKX_TZ"),
 		EnvFile:          envFile,
 		LogLevel:         strings.ToLower(lookupEnv(dot, "SEEKX_LOG_LEVEL")),
+		AllowedHosts:     parseAllowedHosts(lookupEnv(dot, "SEEKX_ALLOWED_HOSTS")),
 	}
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = defaultAPIBaseURL
