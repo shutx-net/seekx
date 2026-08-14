@@ -770,7 +770,7 @@ func TestColumnIcons(t *testing.T) {
 		t.Error("表示列数の見出しは視覚的に残す")
 	}
 	// 検索フォームと共用のクラスを列数側で使い回さない（変更が波及する）。
-	i := strings.Index(out, `<fieldset aria-describedby="cols-note">`)
+	i := strings.Index(out, `<legend>表示列数</legend>`)
 	end := strings.Index(out[i:], "</fieldset>")
 	if block := out[i : i+end]; strings.Contains(block, `class="radio"`) || strings.Contains(block, `class="checks"`) {
 		t.Error("列数の操作部で .checks / .radio を使わない（フォーム画面に波及する）")
@@ -865,26 +865,41 @@ func TestLayoutLoadsExternalScripts(t *testing.T) {
 
 // TestStickyHeader は上部固定の CSS が壊れていないことを確認する。
 // 固定するのはヘッダと一覧の操作部だけで、クエリ表示・メタ情報・ページングは流す。
-func TestStickyHeader(t *testing.T) {
-	b, err := staticFS.ReadFile("static/style.css")
-	if err != nil {
-		t.Fatalf("style.css を読めない: %v", err)
+// stripCSSComments は /* ... */ を落とす。
+//
+// 【CSS の不変条件は必ずコメントを落としてから検査する。】このファイルのコメントは
+// 「align-items: start は必須」のように規則そのものを引用しているため、コメントを
+// 残したまま部分一致を見ると、規則を消してもコメントが残っているだけで検査が通る。
+// ブロックを波括弧で切り出す処理も、コメント中の括弧に釣られなくなる。
+func stripCSSComments(css string) string {
+	var sb strings.Builder
+	for {
+		i := strings.Index(css, "/*")
+		if i < 0 {
+			sb.WriteString(css)
+			return sb.String()
+		}
+		sb.WriteString(css[:i])
+		j := strings.Index(css[i:], "*/")
+		if j < 0 {
+			return sb.String()
+		}
+		css = css[i+j+2:]
 	}
-	css := string(b)
+}
 
-	// 固定は 720px 以上のみ。狭い画面で固定すると投稿を読む領域が残らない。
-	i := strings.Index(css, "@media (min-width: 720px)")
+// cssBlock は prefix で始まる規則ブロックを、波括弧を数えて切り出す。
+// ファイル末尾までを見ると無関係な .dialog-close の position: sticky まで数えてしまう。
+// prefix には `{` まで含めること。`@media (min-width: 1024px) {` と
+// `@media (min-width: 1024px) and (max-width: ...)` は前方一致では区別できない。
+func cssBlock(t *testing.T, css, prefix string) string {
+	t.Helper()
+	i := strings.Index(css, prefix)
 	if i < 0 {
-		t.Fatal("固定は @media (min-width: 720px) の中に置く")
-	}
-	// メディアクエリのブロックだけを切り出す（波括弧を数える）。ファイル末尾までを見ると
-	// 無関係な .dialog-close の position: sticky まで数えてしまう。
-	open := strings.Index(css[i:], "{")
-	if open < 0 {
-		t.Fatal("@media のブロックが開いていない")
+		t.Fatalf("%s が無い", prefix)
 	}
 	depth, end := 0, -1
-	for j := i + open; j < len(css); j++ {
+	for j := i + len(prefix) - 1; j < len(css); j++ {
 		switch css[j] {
 		case '{':
 			depth++
@@ -899,15 +914,30 @@ func TestStickyHeader(t *testing.T) {
 		}
 	}
 	if end < 0 {
-		t.Fatal("@media のブロックが閉じていない")
+		t.Fatalf("%s のブロックが閉じていない", prefix)
 	}
-	sticky := css[i:end]
+	return css[i:end]
+}
+
+func TestStickyHeader(t *testing.T) {
+	b, err := staticFS.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("style.css を読めない: %v", err)
+	}
+	css := stripCSSComments(string(b))
+
+	// 固定は 2 つのブロックに分かれている。ヘッダは 720px 以上（狭い画面で固定すると
+	// 投稿を読む領域が残らない）、サイドバーは横に並ぶ 1024px 以上（#17）。
+	header := cssBlock(t, css, "@media (min-width: 720px) {")
+	side := cssBlock(t, css, "@media (min-width: 1024px) {")
+	sticky := header + side
+
 	if n := strings.Count(sticky, "position: sticky"); n != 2 {
-		t.Errorf("固定するのは .site-header と .list-controls の 2 つだけ: position: sticky = %d", n)
+		t.Errorf("固定するのは .site-header と .results-side の 2 つだけ: position: sticky = %d", n)
 	}
 
 	// 固定要素は必ず背景を塗る。透明だと下のカードが透ける。
-	for _, block := range []string{".site-header {", ".list-controls {"} {
+	for _, block := range []string{".site-header {", ".results-side {"} {
 		j := strings.Index(sticky, block)
 		if j < 0 {
 			t.Errorf("%s が固定ブロックに無い", block)
@@ -920,7 +950,10 @@ func TestStickyHeader(t *testing.T) {
 	}
 
 	// 流す側を誤って固定していないこと。
-	for _, must := range []string{".query-box", ".meta-list", ".paging"} {
+	// #17 で .query-box / .meta-list はサイドバー（固定する側）へ移ったので対象から外した。
+	// 「金額付きリンクを常時見える位置に置かない」という元の意図は、それらがサイドバーの
+	// 外にあることを見る TestResultsSidebarLayout が引き継いでいる。
+	for _, must := range []string{".paging", ".post-list", ".results-main"} {
 		j := strings.Index(sticky, must+" {")
 		if j < 0 {
 			continue
@@ -929,6 +962,12 @@ func TestStickyHeader(t *testing.T) {
 		if strings.Contains(sticky[j:j+end], "position: sticky") {
 			t.Errorf("%s は固定しない（ページングは金額付きリンクなので誤クリックを招く）", must)
 		}
+	}
+
+	// サイドバーはグリッド項目なので、既定の align-items: stretch のままだと行の高さまで
+	// 伸びて貼り付く余地が無くなり、sticky が無言で効かなくなる。
+	if !strings.Contains(sticky, "align-items: start") {
+		t.Error("2 カラムに align-items: start が無い（サイドバーが伸びて sticky が効かない）")
 	}
 
 	// 絞り込みを開いたときに画面を埋め尽くさないよう、高さを制限して内部スクロールにする。
@@ -940,6 +979,54 @@ func TestStickyHeader(t *testing.T) {
 	// 読むとヘッダの高さが増える方向にしか動かなくなる。
 	if strings.Contains(sticky, "min-height: var(--header-h)") {
 		t.Error("min-height: var(--header-h) は書かない（JS の実測値と循環してヘッダが縮まなくなる）")
+	}
+}
+
+// TestSidebarStaysPutAcrossColumnCounts は、列数を切り替えてもサイドバーの位置が
+// 変わらないことを固定する。
+//
+// main / .site-header / .banner / .site-footer は --max で中央寄せされているので、
+// --max が列数で変わるとページの左端が横に飛び、サイドバーごと動く。結果ページの
+// --max は列数に依らない --list-max-wide から組み立て、余りはカード列の右に残す。
+func TestSidebarStaysPutAcrossColumnCounts(t *testing.T) {
+	b, err := staticFS.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("style.css を読めない: %v", err)
+	}
+	css := stripCSSComments(string(b))
+
+	page := cssBlock(t, css, `:root[data-page="results"] {`)
+	if !strings.Contains(page, "var(--list-max-wide)") {
+		t.Error("結果ページの --max は --list-max-wide（列数に依らない）から組み立てる")
+	}
+	// var(--list-max-wide) には部分一致しない（"max" の次が "-" で ")" ではない）。
+	if strings.Contains(page, "var(--list-max)") {
+		t.Error("結果ページの --max に --list-max を使ってはいけない（列数でページ幅が変わり、サイドバーが横に飛ぶ）")
+	}
+
+	// 3 列の幅と固定位置の基準は同じ値でなければならない。数値を 2 か所に書くと、
+	// 片方だけ変えたときに 3 列でだけ余白がずれる。
+	cols3 := cssBlock(t, css, `:root[data-cols="3"] {`)
+	if !strings.Contains(cols3, "var(--list-max-wide)") {
+		t.Error(`:root[data-cols="3"] は --list-max-wide を参照する（3 列の幅を基準と一致させる）`)
+	}
+
+	// 固定したページ幅の余りをカード列に使わせない。使わせると 1 列のカードが
+	// ページ幅いっぱいまで伸びる。
+	side := cssBlock(t, css, "@media (min-width: 1024px) {")
+	if !strings.Contains(side, "max-width: var(--list-max)") {
+		t.Error("カード列に max-width: var(--list-max) が無い（1 列のカードがページ幅まで伸びる）")
+	}
+	// 余った幅は左右へ均等に配る。auto マージンでないと（justify-self: center など）
+	// グリッド項目の幅が fit-content になり、カードの中身で列幅が動く。
+	// 素の .results-main（メディアクエリの外、min-width だけ）と紛れないよう、
+	// 切り出し済みの側から探す。
+	main := cssBlock(t, side, ".results-main {")
+	if !strings.Contains(main, "margin-inline: auto") {
+		t.Error("カード列に margin-inline: auto が無い（余白が右側だけに寄る）")
+	}
+	if strings.Contains(main, "justify-self") {
+		t.Error("justify-self で寄せてはいけない（幅が fit-content になり列幅が中身で変わる）")
 	}
 }
 
@@ -1286,7 +1373,6 @@ func TestPostListMarkup(t *testing.T) {
 		`<legend>表示列数</legend>`,
 		// 絞り込みは fieldset/legend ではなく details/summary。summary がラベル兼トグル。
 		`<summary aria-describedby="filter-scope-note">このページの絞り込み（再検索なし）`,
-		`aria-describedby="cols-note"`,
 		`aria-describedby="filter-scope-note"`,
 		`aria-describedby="f-likes-note"`,
 		`role="status"`,
@@ -1301,7 +1387,6 @@ func TestPostListMarkup(t *testing.T) {
 		`id="f-no-sensitive"`, `id="f-no-link"`,
 		"絞り込んでもコストは下がりません",
 		"検索結果の全体には及びません",
-		"画面幅が狭いときは自動的に列数を減らします",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("コントロールに %q が含まれていない", want)
@@ -1392,6 +1477,91 @@ func TestZeroResultsHasNoControls(t *testing.T) {
 	}
 }
 
+// sliceDiv は openTag で始まる <div> の中身を、入れ子の深さを数えて切り出す。
+// 単純な次の </div> までの切り出しでは入れ子の 1 つ目で止まってしまう。
+func sliceDiv(t *testing.T, html, openTag string) string {
+	t.Helper()
+	i := strings.Index(html, openTag)
+	if i < 0 {
+		t.Fatalf("%s が無い", openTag)
+	}
+	depth := 0
+	for j := i; j < len(html); j++ {
+		switch {
+		case strings.HasPrefix(html[j:], "<div"):
+			depth++
+		case strings.HasPrefix(html[j:], "</div>"):
+			depth--
+			if depth == 0 {
+				return html[i:j]
+			}
+		}
+	}
+	t.Fatalf("%s が閉じていない", openTag)
+	return ""
+}
+
+// TestResultsSidebarLayout は結果ページの 2 カラム構造を固定する（#17）。
+// 何がサイドバーに入り、何が入らないかを見る。
+func TestResultsSidebarLayout(t *testing.T) {
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
+	router := newRouter(app)
+	req := newTestRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&endpoint=recent&mode=execute", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d", rec.Code)
+	}
+	body := rec.Body.String()
+
+	// CSS がサイドバーぶんの横幅を当てる手掛かり。サーバが出すので JS の有無に依らない。
+	if !strings.Contains(body, `<html lang="ja" data-page="results">`) {
+		t.Error(`<html> に data-page="results" が無い（結果ページだけ横幅が広がらなくなる）`)
+	}
+
+	// 開きタグは前方一致で探す。完全一致にすると、属性を 1 つ足しただけで
+	// 「要素が無い」という無関係な失敗になり、下の hidden 検査まで到達しない。
+	side := sliceDiv(t, body, `<div class="results-side"`)
+	main := sliceDiv(t, body, `<div class="results-main"`)
+
+	// サイドバーに入るもの。
+	for _, want := range []string{`id="list-controls"`, "表示列数", `class="query-box"`, `class="meta-list"`} {
+		if !strings.Contains(side, want) {
+			t.Errorf("サイドバーに %q が無い", want)
+		}
+	}
+
+	// サイドバーに入れてはいけないもの。
+	// .paging と再見積りは金額付きのリンク。サイドバーは常時見える位置なので、
+	// ここに置くと誤クリックを招く（#3 で決めた方針を #17 でも維持する）。
+	for _, bad := range []string{`class="paging"`, "件を取得（+", "再見積り", `id="post-list"`} {
+		if strings.Contains(side, bad) {
+			t.Errorf("サイドバーに %q を入れてはいけない", bad)
+		}
+	}
+
+	// カード列に入るもの。
+	for _, want := range []string{`id="post-list"`, `class="paging"`, "再見積り"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("カード列に %q が無い", want)
+		}
+	}
+
+	// 【サイドバーそのものを hidden にしてはいけない。】hidden は JS が外すまで表示されない
+	// コントロール（#list-controls）だけに付ける。サイドバーごと隠すと、JS 無効時に
+	// クエリ文字列とコスト表示まで消える。
+	openTag := body[strings.Index(body, `<div class="results-side"`):]
+	openTag = openTag[:strings.Index(openTag, ">")]
+	if strings.Contains(openTag, "hidden") {
+		t.Error("results-side に hidden を付けてはいけない（JS 無効時にクエリとコストが消える）")
+	}
+
+	// 読み上げ順・フォーカス順は「コントロール → カード」のまま。
+	if strings.Index(body, "results-side") > strings.Index(body, `id="post-list"`) {
+		t.Error("サイドバーはカードより前に置く（フォーカス順が変わる）")
+	}
+}
+
 // TestStyleSheetInvariants は static/style.css の不変条件を固定する（css_spec）。
 // staticFS から読むので、実際に配信される内容を検証している。
 func TestStyleSheetInvariants(t *testing.T) {
@@ -1399,7 +1569,7 @@ func TestStyleSheetInvariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("style.css を読めない: %v", err)
 	}
-	css := string(b)
+	css := stripCSSComments(string(b))
 
 	for _, want := range []string{
 		".post-list {",
@@ -1413,22 +1583,47 @@ func TestStyleSheetInvariants(t *testing.T) {
 		".filter-details",
 		// 件数バッジの表示制御は :empty に依存している。消えるとバッジが常時出る。
 		".filter-badge:empty { display: none; }",
+		// 絞り込みの数値欄はサイドバー幅で 2 列固定。共用の .grid2 は auto-fit のまま
+		// 残すこと（直接変えると検索フォームの入力欄まで巻き添えになる）。
+		".list-controls .grid2 {",
+		"repeat(auto-fit, minmax(180px, 1fr))",
 		// summary に display: flex を当てるとネイティブの開閉マーカーが消えるため、
 		// ＋ / − を ::before で自前描画している。消えると開閉できることが分からなくなる。
 		".filter-details > summary::before",
 		".filter-details[open] > summary::before",
-		// 上部固定。--header-h / min-height / top の 3 つが揃っていないと、
-		// #list-controls がヘッダの下に潜るか、隙間が空いてカードが透ける。
+		// 上部固定。--header-h と top が揃っていないと、サイドバーがヘッダの下に潜るか、
+		// 隙間が空いてカードが透ける。
 		"--header-h:",
 		"top: var(--header-h)",
-		"@media (min-width: 720px)",
+		// ヘッダの固定は 720px 以上、サイドバーを横に並べるのは 1024px 以上。
+		// 閾値が違うのは意図で、400px のサイドバーを 720px の画面に横置きすると
+		// カード領域が 284px しか残らないため（#17）。
+		"@media (min-width: 720px) {",
+		"@media (min-width: 1024px) {",
+		// 2 カラム（#17）。--max はカード領域の幅 + サイドバー幅から組み立てる。
+		// data-page はサーバが出す属性で、これが無いと結果ページだけ横幅が広がらない。
+		// セレクタの形まで見る。クラス名だけだと、規則を消してもコメント中の言及で
+		// 検査が通ってしまう。
+		".results-layout {",
+		".results-side {",
+		".results-main {",
+		"--list-max:",
+		"--side-w:",
+		`:root[data-page="results"] { --max: calc(`,
+		"grid-template-columns: var(--side-w) minmax(0, 1fr)",
 		// 列数アイコン。読み上げ用テキストと選択・フォーカス表示が揃っていること。
 		".sr-only",
 		".cols-icon",
 		".cols-option input:checked + .cols-icon",
 		".cols-option input:focus-visible + .cols-icon",
+		// 列数を落とす閾値は 2 系統（#17）。サイドバーを積んでいる 1024px 未満は
+		// カードが全幅を使えるのでサイドバー無しの値、横に並ぶ 1024px 以上は
+		// サイドバーの 436px を引いた残りで判断する。1 系統にまとめると、
+		// 積んでいる 720〜1023px で全幅あるのに 1 列へ落ちる。
+		"@media (max-width: 1023px)",
 		"@media (max-width: 719px)",
-		"@media (max-width: 1039px)",
+		"@media (min-width: 1024px) and (max-width: 1451px)",
+		"@media (min-width: 1024px) and (max-width: 1131px)",
 		// 本文の改行は <br> 置換ではなく CSS で表現する（D-24）。
 		// テンプレート側が素の本文を出す前提なので、この宣言が消えると改行が失われる。
 		"white-space: pre-wrap",
@@ -1444,8 +1639,8 @@ func TestStyleSheetInvariants(t *testing.T) {
 			t.Errorf("style.css に %q を書いてはいけない（D-38 / P-GRID-1FR）", bad)
 		}
 	}
-	if n := strings.Count(css, "minmax(0, 1fr)"); n < 5 {
-		t.Errorf("minmax(0, 1fr) の出現回数 = %d, want >= 5", n)
+	if n := strings.Count(css, "minmax(0, 1fr)"); n < 7 {
+		t.Errorf("minmax(0, 1fr) の出現回数 = %d, want >= 7", n)
 	}
 
 	// AC-08: フォーカスリングを消さない。

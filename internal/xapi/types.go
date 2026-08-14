@@ -145,7 +145,9 @@ type Variant struct {
 	URL         string `json:"url"`
 }
 
-// Meta はページングと差分取得。newest_id / oldest_id は docs に無いが実際に返る（DR-07）。
+// Meta はページング。newest_id / oldest_id は docs に無いが実際に返る（DR-07）。
+// この 2 つは UI では使っていない。API についての事実として型に残してある
+// （このパッケージは X API の実際の挙動を記録する場所）。
 type Meta struct {
 	ResultCount   int    `json:"result_count"`
 	NextToken     string `json:"next_token"`

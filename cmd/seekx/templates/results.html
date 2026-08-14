@@ -2,148 +2,168 @@
 
 <h1>検索結果</h1>
 
-<div class="query-box">
-  <strong>生成されたクエリ</strong>
-  <code>{{.Result.QueryString}}</code>
-  <p class="hint">{{.Result.QueryRunes}} 文字 / 上限 {{.Result.QueryLimit}} 文字（参考: {{.Result.QueryBytes}} バイト）</p>
-</div>
+{{/* 2 カラム（#17）。左は「この検索についての情報と操作」、右は投稿カードだけ。
 
-<ul class="meta-list">
-  <li>表示中 <span class="strong">{{num .Result.ResultCount}} 件</span>（検索範囲: {{.Result.EndpointName}} / 取得件数 {{.Result.MaxResults}}）</li>
-  {{if .Result.StartDisplay}}<li>期間: {{.Result.StartDisplay}} 〜 {{.Result.EndDisplay}}（{{.TZ}}）</li>{{end}}
-  <li>今回の推定コスト: <span class="strong">{{usd .Result.SpentUSD}}</span> / セッション累計 {{usd .SessionUSD}}</li>
-  {{if .Result.RateLimit}}<li>レートリミット残り: {{.Result.RateLimit.Remaining}} / {{.Result.RateLimit.Limit}}{{if .RateLimitReset}}（{{.RateLimitReset}} にリセット・{{.TZ}}）{{end}}</li>{{end}}
-  {{if .Result.NewestID}}<li>newest_id: <code>{{.Result.NewestID}}</code> / oldest_id: <code>{{.Result.OldestID}}</code>（差分取得の下地）</li>{{end}}
-</ul>
+     ページング（.paging）と再見積り（.actions）は右に残す。どちらも金額付きのリンクで、
+     常時見える位置に置くと誤クリックを招く。#3 で「固定するのは操作部だけ、
+     ページングは流す」と決めた方針をサイドバー化でも維持している。
 
-<p class="hint">このページの再読み込みは再検索になります（同一投稿の再取得は 24 時間以内なら追加の金銭コストが発生しにくいですが、cap とレートリミットは消費します）。</p>
+     サイドバーは <aside> にしない。中身はこの検索そのものの情報（クエリ・件数・コスト）と
+     カードを操作するコントロールで、「本文と切り離しても意味を持つ補足」ではないため。
+     読み上げ順・フォーカス順は従来どおり「コントロール → カード」で変わらない。 */}}
+<div class="results-layout">
+  <div class="results-side">
+    <div class="query-box">
+      <strong>生成されたクエリ</strong>
+      <code>{{.Result.QueryString}}</code>
+      <p class="hint">{{.Result.QueryRunes}} 文字 / 上限 {{.Result.QueryLimit}} 文字（参考: {{.Result.QueryBytes}} バイト）</p>
+    </div>
 
-{{if .Result.Warnings}}
-<div class="notice notice-warn">
-  <ul>{{range .Result.Warnings}}<li>{{.}}</li>{{end}}</ul>
-</div>
-{{end}}
+    <ul class="meta-list">
+      <li>表示中 <span class="strong">{{num .Result.ResultCount}} 件</span>（検索範囲: {{.Result.EndpointName}} / 取得件数 {{.Result.MaxResults}}）</li>
+      {{if .Result.StartDisplay}}<li>期間: {{.Result.StartDisplay}} 〜 {{.Result.EndDisplay}}（{{.TZ}}）</li>{{end}}
+      <li>今回の推定コスト: <span class="strong">{{usd .Result.SpentUSD}}</span> / セッション累計 {{usd .SessionUSD}}</li>
+      {{if .Result.RateLimit}}<li>レートリミット残り: {{.Result.RateLimit.Remaining}} / {{.Result.RateLimit.Limit}}{{if .RateLimitReset}}（{{.RateLimitReset}} にリセット・{{.TZ}}）{{end}}</li>{{end}}
+    </ul>
 
-{{if .Result.PartialErrors}}
-<div class="notice notice-warn">
-  <strong>一部のデータを取得できませんでした（HTTP 200 の部分成功）</strong>
-  <ul>{{range .Result.PartialErrors}}<li>{{.}}</li>{{end}}</ul>
-</div>
-{{end}}
+    <p class="hint">このページの再読み込みは再検索になります（同一投稿の再取得は 24 時間以内なら追加の金銭コストが発生しにくいですが、cap とレートリミットは消費します）。</p>
 
-{{if .Result.Posts}}
-  {{/* 一覧の列数と絞り込みのコントロール。フォーム要素は置かない（D-47 / P-FORM-ENTER）。
-       置くと数値欄の Enter で暗黙の submit が起き、この URL の再読み込み＝再検索になる。
-       JS が hidden を外す（D-52）。API は呼ばない。 */}}
-  <div class="list-controls" id="list-controls" hidden>
-    <fieldset aria-describedby="cols-note">
-      <legend>表示列数</legend>
-      {{/* ラジオ input は視覚的に隠すだけで DOM には残す。<button> 群に置き換えると
-           role="radiogroup" と矢印キー処理を自前で実装することになり、インライン JS の
-           行数上限（D-55）に収まらない。この形ならキーボード操作と読み上げはネイティブのまま。
-           アイコンの棒の本数が列数そのものを表す。 */}}
-      <div class="cols-options">
-        <label class="cols-option">
-          <input type="radio" name="cols" value="1" checked>
-          <span class="cols-icon" aria-hidden="true"><span></span></span>
-          <span class="sr-only">1 列</span>
-        </label>
-        <label class="cols-option">
-          <input type="radio" name="cols" value="2">
-          <span class="cols-icon" aria-hidden="true"><span></span><span></span></span>
-          <span class="sr-only">2 列</span>
-        </label>
-        <label class="cols-option">
-          <input type="radio" name="cols" value="3">
-          <span class="cols-icon" aria-hidden="true"><span></span><span></span><span></span></span>
-          <span class="sr-only">3 列</span>
-        </label>
-      </div>
-      <p class="hint" id="cols-note">列数はこのブラウザに保存され、次回以降の検索結果にも適用されます。URL には含めないため、切り替えても再検索は発生しません。画面幅が狭いときは自動的に列数を減らします。</p>
-    </fieldset>
+    {{if .Result.Warnings}}
+    <div class="notice notice-warn">
+      <ul>{{range .Result.Warnings}}<li>{{.}}</li>{{end}}</ul>
+    </div>
+    {{end}}
 
-    {{/* 既定は閉じた状態。open 属性は付けず、開閉状態も保存しない（保存すると <details open> の
-         初期値をサーバ側で出せず、読み込み後に JS で開くぶんのチラつきが出る）。
-         閉じているときも絞り込みが効いていることが分かるよう、件数を summary にも出す。 */}}
-    <details class="filter-details" id="filter-details">
-      <summary aria-describedby="filter-scope-note">このページの絞り込み（再検索なし）<span
-        class="filter-badge" id="filter-summary-count"></span></summary>
-      <div class="grid2">
-        <div class="field">
-          <label for="f-runes-min">本文の文字数（最小）</label>
-          <input type="number" id="f-runes-min" min="0" step="1" inputmode="numeric" placeholder="指定なし">
+    {{if .Result.PartialErrors}}
+    <div class="notice notice-warn">
+      <strong>一部のデータを取得できませんでした（HTTP 200 の部分成功）</strong>
+      <ul>{{range .Result.PartialErrors}}<li>{{.}}</li>{{end}}</ul>
+    </div>
+    {{end}}
+
+    {{if .Result.Posts}}
+    {{/* 一覧の列数と絞り込みのコントロール。フォーム要素は置かない（D-47 / P-FORM-ENTER）。
+         置くと数値欄の Enter で暗黙の submit が起き、この URL の再読み込み＝再検索になる。
+         サイドバー全体ではなくこのブロックだけを hidden にする（D-52）。JS が無いと動かないのは
+         コントロールだけで、上のクエリ・メタ情報は JS 無しでも意味があるため。 */}}
+    <div class="list-controls" id="list-controls" hidden>
+      <fieldset>
+        <legend>表示列数</legend>
+        {{/* ラジオ input は視覚的に隠すだけで DOM には残す。<button> 群に置き換えると
+             role="radiogroup" と矢印キー処理を自前で実装することになり、インライン JS の
+             行数上限（D-55）に収まらない。この形ならキーボード操作と読み上げはネイティブのまま。
+             アイコンの棒の本数が列数そのものを表す。 */}}
+        <div class="cols-options">
+          <label class="cols-option">
+            <input type="radio" name="cols" value="1" checked>
+            <span class="cols-icon" aria-hidden="true"><span></span></span>
+            <span class="sr-only">1 列</span>
+          </label>
+          <label class="cols-option">
+            <input type="radio" name="cols" value="2">
+            <span class="cols-icon" aria-hidden="true"><span></span><span></span></span>
+            <span class="sr-only">2 列</span>
+          </label>
+          <label class="cols-option">
+            <input type="radio" name="cols" value="3">
+            <span class="cols-icon" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span class="sr-only">3 列</span>
+          </label>
         </div>
-        <div class="field">
-          <label for="f-runes-max">本文の文字数（最大）</label>
-          <input type="number" id="f-runes-max" min="0" step="1" inputmode="numeric" placeholder="指定なし">
+      </fieldset>
+
+      {{/* 既定は閉じた状態。open 属性は付けず、開閉状態も保存しない（保存すると <details open> の
+           初期値をサーバ側で出せず、読み込み後に JS で開くぶんのチラつきが出る）。
+           閉じているときも絞り込みが効いていることが分かるよう、件数を summary にも出す。 */}}
+      <details class="filter-details" id="filter-details">
+        <summary aria-describedby="filter-scope-note">このページの絞り込み（再検索なし）<span
+          class="filter-badge" id="filter-summary-count"></span></summary>
+        <div class="grid2">
+          {{/* ラベルは 2 列に収まる長さに詰めてある。「本文の」「枚数」といった限定が
+               落ちるぶんは aria-describedby と下の hint が補う。 */}}
+          <div class="field">
+            <label for="f-runes-min">最小文字数</label>
+            <input type="number" id="f-runes-min" min="0" step="1" inputmode="numeric" placeholder="指定なし"
+              aria-describedby="filter-runes-note">
+          </div>
+          <div class="field">
+            <label for="f-runes-max">最大文字数</label>
+            <input type="number" id="f-runes-max" min="0" step="1" inputmode="numeric" placeholder="指定なし"
+              aria-describedby="filter-runes-note">
+          </div>
+          <div class="field">
+            <label for="f-media-min">最小メディア数</label>
+            <input type="number" id="f-media-min" min="0" max="10" step="1" inputmode="numeric" placeholder="指定なし">
+          </div>
+          <div class="field">
+            <label for="f-likes-min">最小いいね数</label>
+            <input type="number" id="f-likes-min" min="0" step="1" inputmode="numeric" placeholder="指定なし"
+              aria-describedby="f-likes-note">
+          </div>
         </div>
-        <div class="field">
-          <label for="f-media-min">メディアの枚数（最小）</label>
-          <input type="number" id="f-media-min" min="0" max="10" step="1" inputmode="numeric" placeholder="指定なし">
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="f-no-reply"> 返信を除く</label>
+          <label class="check"><input type="checkbox" id="f-no-repost"> リポストを除く</label>
+          <label class="check"><input type="checkbox" id="f-no-quote"> 引用を除く</label>
+          <label class="check"><input type="checkbox" id="f-no-sensitive"> センシティブな投稿を除く</label>
+          <label class="check"><input type="checkbox" id="f-no-link"> リンクを含む投稿を除く</label>
         </div>
-        <div class="field">
-          <label for="f-likes-min">いいねの最小数</label>
-          <input type="number" id="f-likes-min" min="0" step="1" inputmode="numeric" placeholder="指定なし"
-            aria-describedby="f-likes-note">
+        <p class="hint" id="f-likes-note">メトリクスを取得できなかった投稿は、いいねの最小数を指定すると除外されます（0 件と区別できないため）。</p>
+        <p class="hint" id="filter-runes-note">文字数は本文の文字数（Unicode コードポイント数）です。サーバ側で数えているため、バイト数ではありません。絵文字の一部は 2 文字以上として数えられます。長文投稿は全文の文字数です。</p>
+        <p class="hint" id="filter-scope-note">絞り込みは、いま表示しているこのページの取得済み投稿だけに適用されます。検索結果の全体には及びません。ページを移動すると絞り込みは解除され、移動先のページの取得には新たにコストが発生します。ページをまたいで絞り込みたい場合は、検索条件（返信を除く・メディア付きなど）を指定して検索し直してください。</p>
+        <p class="hint" id="filter-cost-note">絞り込んでもコストは下がりません。このページの投稿の post read は取得した時点で課金済みです（画面上部の推定コストは取得件数に対する実績で、絞り込みでは変わりません）。</p>
+        <div class="actions">
+          <button type="button" id="filter-reset" class="secondary">絞り込みを解除</button>
+          <p class="filter-count" id="filter-count" role="status">{{num .Result.ResultCount}} / {{num .Result.ResultCount}} 件表示中</p>
         </div>
-      </div>
-      <div class="checks">
-        <label class="check"><input type="checkbox" id="f-no-reply"> 返信を除く</label>
-        <label class="check"><input type="checkbox" id="f-no-repost"> リポストを除く</label>
-        <label class="check"><input type="checkbox" id="f-no-quote"> 引用を除く</label>
-        <label class="check"><input type="checkbox" id="f-no-sensitive"> センシティブな投稿を除く</label>
-        <label class="check"><input type="checkbox" id="f-no-link"> リンクを含む投稿を除く</label>
-      </div>
-      <p class="hint" id="f-likes-note">メトリクスを取得できなかった投稿は、いいねの最小数を指定すると除外されます（0 件と区別できないため）。</p>
-      <p class="hint" id="filter-runes-note">文字数は本文の文字数（Unicode コードポイント数）です。サーバ側で数えているため、バイト数ではありません。絵文字の一部は 2 文字以上として数えられます。長文投稿は全文の文字数です。</p>
-      <p class="hint" id="filter-scope-note">絞り込みは、いま表示しているこのページの取得済み投稿だけに適用されます。検索結果の全体には及びません。ページを移動すると絞り込みは解除され、移動先のページの取得には新たにコストが発生します。ページをまたいで絞り込みたい場合は、検索条件（返信を除く・メディア付きなど）を指定して検索し直してください。</p>
-      <p class="hint" id="filter-cost-note">絞り込んでもコストは下がりません。このページの投稿の post read は取得した時点で課金済みです（画面上部の推定コストは取得件数に対する実績で、絞り込みでは変わりません）。</p>
-      <div class="actions">
-        <button type="button" id="filter-reset" class="secondary">絞り込みを解除</button>
-        <p class="filter-count" id="filter-count" role="status">{{num .Result.ResultCount}} / {{num .Result.ResultCount}} 件表示中</p>
-      </div>
-    </details>
+      </details>
+    </div>
+    {{end}}
   </div>
 
-  <div class="post-list" id="post-list">
-    {{range .Result.Posts}}{{template "_post.html" .}}{{end}}
+  <div class="results-main">
+    {{if .Result.Posts}}
+    <div class="post-list" id="post-list">
+      {{range .Result.Posts}}{{template "_post.html" .}}{{end}}
+    </div>
+
+    <p class="notice filter-empty" id="filter-empty" hidden>絞り込み条件に一致する投稿はありません（取得済み {{num .Result.ResultCount}} 件）。条件を緩めるか「絞り込みを解除」を押してください。取得済みの投稿は失われていません。</p>
+    {{else}}
+    <div class="notice">
+      <strong>該当する投稿は 0 件でした。</strong>
+      <p class="hint">0 件のため post read の課金は発生していません（counts を実行していた場合はその分のみ発生します）。</p>
+      <p>条件を緩めるヒント:</p>
+      <ul>{{range .EmptyHints}}<li>{{.}}</li>{{end}}</ul>
+    </div>
+    {{end}}
+
+    <div class="paging">
+      {{if .PrevURL}}
+        {{if .PagingBlocked}}
+        <span class="btn secondary" aria-disabled="true">前の {{.Result.MaxResults}} 件（実行不可）</span>
+        {{else}}
+        <a class="btn secondary" href="{{.PrevURL}}">前の {{.Result.MaxResults}} 件（+{{usd .NextCost}}）</a>
+        {{end}}
+      {{else}}<span></span>{{end}}
+
+      {{if .NextURL}}
+        {{if .PagingBlocked}}
+        <span class="btn" aria-disabled="true">次の {{.Result.MaxResults}} 件（実行不可）</span>
+        {{else}}
+        <a class="btn" href="{{.NextURL}}">次の {{.Result.MaxResults}} 件を取得（+{{usd .NextCost}}）</a>
+        {{end}}
+      {{end}}
+    </div>
+
+    {{if .PagingBlocked}}
+    <div class="notice notice-error"><p>{{.PagingReason}}</p></div>
+    {{end}}
+
+    <div class="actions">
+      <a class="btn secondary" href="{{.FormURL}}">条件を修正する</a>
+      <a class="btn secondary" href="{{.EstimateURL}}">この条件で再見積り（{{usd .CountsCost}}）</a>
+    </div>
   </div>
-
-  <p class="notice filter-empty" id="filter-empty" hidden>絞り込み条件に一致する投稿はありません（取得済み {{num .Result.ResultCount}} 件）。条件を緩めるか「絞り込みを解除」を押してください。取得済みの投稿は失われていません。</p>
-{{else}}
-<div class="notice">
-  <strong>該当する投稿は 0 件でした。</strong>
-  <p class="hint">0 件のため post read の課金は発生していません（counts を実行していた場合はその分のみ発生します）。</p>
-  <p>条件を緩めるヒント:</p>
-  <ul>{{range .EmptyHints}}<li>{{.}}</li>{{end}}</ul>
-</div>
-{{end}}
-
-<div class="paging">
-  {{if .PrevURL}}
-    {{if .PagingBlocked}}
-    <span class="btn secondary" aria-disabled="true">前の {{.Result.MaxResults}} 件（実行不可）</span>
-    {{else}}
-    <a class="btn secondary" href="{{.PrevURL}}">前の {{.Result.MaxResults}} 件（+{{usd .NextCost}}）</a>
-    {{end}}
-  {{else}}<span></span>{{end}}
-
-  {{if .NextURL}}
-    {{if .PagingBlocked}}
-    <span class="btn" aria-disabled="true">次の {{.Result.MaxResults}} 件（実行不可）</span>
-    {{else}}
-    <a class="btn" href="{{.NextURL}}">次の {{.Result.MaxResults}} 件を取得（+{{usd .NextCost}}）</a>
-    {{end}}
-  {{end}}
-</div>
-
-{{if .PagingBlocked}}
-<div class="notice notice-error"><p>{{.PagingReason}}</p></div>
-{{end}}
-
-<div class="actions">
-  <a class="btn secondary" href="{{.FormURL}}">条件を修正する</a>
-  <a class="btn secondary" href="{{.EstimateURL}}">この条件で再見積り（{{usd .CountsCost}}）</a>
 </div>
 
 {{template "bottom" .}}
