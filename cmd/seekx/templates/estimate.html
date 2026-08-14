@@ -24,8 +24,10 @@
   <li>今回取得する件数: <span class="strong">{{num .Est.WillFetch}} 件</span> = min(該当件数, 取得件数 {{.MaxResults}})</li>
   <li>予想コスト: <span class="strong">{{usd .Est.TotalMinUSD}}</span>（投稿 {{num .Est.WillFetch}} 件 × $0.005）〜 <span class="strong">{{usd .Est.TotalMaxUSD}}</span>（最大）</li>
   <li>この見積り自体のコスト: {{usd .CountsCost}}（counts 1 リクエスト・すでに発生しています）</li>
+  {{/* 月次 cap の行はヘッダのバッジと数値が重なるが、リセット日を可視で持っているので残す
+       （ヘッダ側は title 属性の中にしか無い）。セッション累計はヘッダと完全に同じ値だったので
+       消した（#19）。 */}}
   {{if .Cap.Known}}<li>月次 cap: {{num .Cap.Usage}} / {{num .Cap.Cap}}（{{pct .Cap.Percent}}・リセットは毎月 {{.Cap.ResetDay}} 日）</li>{{end}}
-  <li>セッション累計: {{usd .SessionUSD}}（{{.SessionCalls}} 回）</li>
 </ul>
 
 <p class="hint">

@@ -208,6 +208,14 @@ func TestRenderTemplates(t *testing.T) {
 		if strings.Contains(out, "ZgotmplZ") {
 			t.Error("テンプレートが値を安全でないと判断した（ZgotmplZ）")
 		}
+		// セッション累計はヘッダのバッジと完全に同じ値だったので消した（#19）。
+		// 結果ページのサイドバーと揃えてある。
+		if strings.Contains(out, "セッション累計") {
+			t.Error("セッション累計はヘッダのバッジと重複する（見積り画面には出さない）")
+		}
+		if !strings.Contains(out, "セッション ") {
+			t.Error("セッション累計はヘッダのバッジに残っていること（消してはいない）")
+		}
 	})
 
 	t.Run("estimate.html（ゲートで実行不可）", func(t *testing.T) {
