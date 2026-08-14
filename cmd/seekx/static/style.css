@@ -152,6 +152,7 @@ main {
 
 .notice-warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
 .notice-error { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-border); }
+.notice-ok { background: var(--ok-bg); border-color: var(--accent); }
 .notice ul { margin: 4px 0 0; padding-left: 1.2em; }
 
 h1 { font-size: 20px; margin: var(--gap) 0; }

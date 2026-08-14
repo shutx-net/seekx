@@ -23,6 +23,7 @@ devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.js
   env SEEKX_FIXTURE_DIR=testdata go run ./cmd/seekx
 
 # 実 API に接続して起動する（課金が発生します）
+# 起動後 http://localhost:5050/settings で Bearer Token を入力します（.env には書きません）
 devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.json go run ./cmd/seekx
 ```
 
@@ -40,7 +41,7 @@ devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.js
 `go build ./...` が循環の不在を保証します。
 
 ```
-cmd/seekx  ──> config, query, cost, view, xapi   （main.go・guard.go・templates/・static/）
+cmd/seekx  ──> config, query, cost, view, xapi   （main.go・guard.go・token.go・templates/・static/）
 cost       ──> config, xapi
 query      ──> xapi
 view       ──> xapi                （query と cost を import しない）
@@ -53,6 +54,21 @@ xapi       ──> 標準ライブラリのみ   （internal を一切 import �
 - `internal/query` … 検索クエリの組み立てと全バリデーション（V01〜V14）
 - `internal/cost` … 見積り、月次 cap ガード、セッション累計（方針の側）
 - `internal/config` … `Config`、`.env` パーサ、`DefaultPort`、タイムゾーン解決
+
+`cmd/seekx` 側の分割:
+
+- `main.go` … 起動、ルーティング、ハンドラ、ViewModel
+- `guard.go` … リクエストの境界チェック（cross-site 検証・Host 検証）
+- `token.go` … 実行中の Bearer Token の保持と差し替え（メモリのみ・永続化しない）
+
+Bearer Token は `.env` と設定画面の 2 経路から入り、設定画面が優先されます。実行時に
+可変なのはこの値だけで、差し替えは `App.applyToken` の 1 箇所に集約しています
+（`Client` への反映・usage キャッシュの破棄・セッション累計のリセットがばらけないように）。
+
+**運用方針: トークンは `.env` に書かず、設定画面（`/settings`）から入力します。**
+この運用ではトークンがディスクに一切残りません（代償は起動のたびの入力）。`.env` 経路は
+その入力を避けたい場合のためにフォールバックとして残していますが、既定の案内ではありません。
+画面・ログ・エラーの文言もこの方針に揃えてあるので、変更するときは併せて直してください。
 
 `testdata/` はリポジトリ直下に置いたままです（`SEEKX_FIXTURE_DIR=testdata` は
 リポジトリ直下を作業ディレクトリとして起動する前提のため）。各パッケージのテストは

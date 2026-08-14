@@ -206,8 +206,13 @@ type Options struct {
 }
 
 type Client struct {
-	httpClient  *http.Client
-	token       string
+	httpClient *http.Client
+
+	// token は実行中に差し替わる（UI からの設定）。読み書きは tokenMu で保護する。
+	// 値をログ・エラー・HTML に出さないのは差し替え後も同じ（P-TOKEN-LEAK）。
+	tokenMu sync.RWMutex
+	token   string
+
 	baseURL     string
 	pacer       *pacer
 	fixtureDir  string
@@ -250,6 +255,39 @@ func NewClient(opts Options, log *slog.Logger) *Client {
 }
 
 func (c *Client) FixtureMode() bool { return c.fixtureDir != "" }
+
+// SetToken は実行中に Bearer Token を差し替える。
+//
+// usage キャッシュを同時に捨てる。usage は「そのトークンのプロジェクトの消費量」であり、
+// 差し替え後もキャッシュを持ち越すと別プロジェクトの cap を表示してしまう（D-29）。
+// 破棄を呼び出し側の責任にすると必ず忘れるので、差し替えと同じ関数の中で行う。
+//
+// フィクスチャモードでは httpClient を作らないという不変条件（D-22）は変えない。
+// トークンを設定してもフィクスチャモードのまま課金経路は生まれない。
+func (c *Client) SetToken(token string) {
+	c.tokenMu.Lock()
+	c.token = token
+	c.tokenMu.Unlock()
+
+	c.usageMu.Lock()
+	c.usageResp = nil
+	c.usageAt = time.Time{}
+	c.usageMu.Unlock()
+}
+
+// HasToken はトークンが設定されているかを返す。値そのものは返さない。
+func (c *Client) HasToken() bool {
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
+	return c.token != ""
+}
+
+// bearerToken は Authorization ヘッダに載せる値を返す。roundTrip からのみ呼ぶ。
+func (c *Client) bearerToken() string {
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
+	return c.token
+}
 
 // ---------------------------------------------------------------------------
 // エンドポイント
@@ -512,7 +550,7 @@ func (c *Client) roundTrip(ctx context.Context, full string) (int, []byte, http.
 		return 0, nil, nil, err
 	}
 	// Authorization ヘッダはここでのみ設定する。ログ・エラーには一切出さない。
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.bearerToken())
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
 
