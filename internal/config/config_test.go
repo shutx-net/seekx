@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeTempEnv(t *testing.T, contents string) string {
@@ -283,6 +284,131 @@ func TestLoadConfigMissingToken(t *testing.T) {
 	}
 	if !cfg.FixtureMode() {
 		t.Error("FixtureMode が true になるべき")
+	}
+}
+
+func TestListenAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		bind string
+		port string
+		want string
+	}{
+		{"既定（コンテナ想定）", "0.0.0.0", "5050", "0.0.0.0:5050"},
+		{"ホストでループバックに絞る", "127.0.0.1", "5050", "127.0.0.1:5050"},
+		// IPv6 リテラルは角括弧で囲まないと ListenAndServe が解釈できない。
+		{"IPv6 ループバック", "::1", "5050", "[::1]:5050"},
+		{"IPv6 ワイルドカード", "::", "5050", "[::]:5050"},
+		{"ホスト名", "localhost", "8080", "localhost:8080"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{BindAddr: tc.bind, Port: tc.port}
+			if got := cfg.ListenAddr(); got != tc.want {
+				t.Errorf("ListenAddr(): got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfigBindAddr(t *testing.T) {
+	// 既定はループバック。広く開ける側（コンテナ）を明示させる向きにしている。
+	t.Run("既定は 127.0.0.1", func(t *testing.T) {
+		p := writeTempEnv(t, "")
+		t.Setenv("SEEKX_ENV_FILE", p)
+		t.Setenv("SEEKX_FIXTURE_DIR", "testdata")
+		t.Setenv("SEEKX_BIND", "")
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.BindAddr != "127.0.0.1" {
+			t.Errorf("BindAddr: got %q, want 127.0.0.1", cfg.BindAddr)
+		}
+		if got := cfg.ListenAddr(); got != "127.0.0.1:"+DefaultPort {
+			t.Errorf("ListenAddr: got %q", got)
+		}
+		if !cfg.BindsLoopback() {
+			t.Error("既定はループバックとして扱われるべき")
+		}
+	})
+
+	// devcontainer が containerEnv で渡す経路。
+	t.Run("SEEKX_BIND で広げられる（前後の空白は落とす）", func(t *testing.T) {
+		p := writeTempEnv(t, "SEEKX_BIND=  0.0.0.0  \n")
+		t.Setenv("SEEKX_ENV_FILE", p)
+		t.Setenv("SEEKX_FIXTURE_DIR", "testdata")
+		t.Setenv("SEEKX_BIND", "")
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.BindAddr != "0.0.0.0" {
+			t.Errorf("BindAddr: got %q, want 0.0.0.0", cfg.BindAddr)
+		}
+		if cfg.BindsLoopback() {
+			t.Error("0.0.0.0 はループバックではない")
+		}
+	})
+
+	// 環境変数は .env より優先される（devcontainer の containerEnv がこちら）。
+	t.Run("環境変数が .env より優先される", func(t *testing.T) {
+		p := writeTempEnv(t, "SEEKX_BIND=127.0.0.1\n")
+		t.Setenv("SEEKX_ENV_FILE", p)
+		t.Setenv("SEEKX_FIXTURE_DIR", "testdata")
+		t.Setenv("SEEKX_BIND", "0.0.0.0")
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.BindAddr != "0.0.0.0" {
+			t.Errorf("BindAddr: got %q, want 0.0.0.0", cfg.BindAddr)
+		}
+	})
+}
+
+func TestBindsLoopback(t *testing.T) {
+	cases := []struct {
+		bind string
+		want bool
+	}{
+		{"127.0.0.1", true},
+		{"127.0.0.53", true}, // 127.0.0.0/8 はすべてループバック
+		{"::1", true},
+		{"localhost", true},
+		{"LocalHost", true},
+		{"  127.0.0.1  ", true},
+		{"0.0.0.0", false},
+		{"::", false},
+		{"192.168.1.5", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := (Config{BindAddr: tc.bind}).BindsLoopback(); got != tc.want {
+			t.Errorf("BindsLoopback(%q): got %v, want %v", tc.bind, got, tc.want)
+		}
+	}
+}
+
+// TestLocationError は SEEKX_TZ を解決できるかどうかを検知できることを確認する。
+// tzdata を同梱しているので、Windows のようにシステムの tz データベースが無い環境でも
+// 正しい名前なら解決できる。誤った名前だけがエラーになる。
+func TestLocationError(t *testing.T) {
+	if err := (Config{DisplayTZ: "Asia/Tokyo"}).LocationError(); err != nil {
+		t.Errorf("Asia/Tokyo は解決できるべき: %v", err)
+	}
+	if err := (Config{DisplayTZ: "UTC"}).LocationError(); err != nil {
+		t.Errorf("UTC は解決できるべき: %v", err)
+	}
+	if err := (Config{DisplayTZ: "Nowhere/Nothing"}).LocationError(); err == nil {
+		t.Error("存在しないタイムゾーンはエラーになるべき")
+	}
+	// 解決できない場合でも Location() は UTC を返して動き続ける（表示は狂うが落ちない）。
+	if loc := (Config{DisplayTZ: "Nowhere/Nothing"}).Location(); loc != time.UTC {
+		t.Errorf("フォールバックは UTC であるべき: got %v", loc)
 	}
 }
 

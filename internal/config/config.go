@@ -30,6 +30,15 @@ const (
 	defaultMaxResultsCap    = 100
 	defaultDisplayTZ        = "Asia/Tokyo"
 	defaultEnvFile          = ".env"
+
+	// defaultBindAddr はループバックに絞る。安全な側を既定にするため。
+	// ホストで直接動かす場合はこれで届き、LAN からは TCP レベルで到達できない。
+	//
+	// コンテナ内のループバックはホストから到達できないので、devcontainer では
+	// SEEKX_BIND=0.0.0.0 が要る（.devcontainer/go/devcontainer.json の containerEnv
+	// で指定している）。0.0.0.0 を既定としていた D-08 / P-BIND-0000 はここで反転し、
+	// 「広く開けるほうを明示させる」向きに変えている。
+	defaultBindAddr = "127.0.0.1"
 )
 
 // ErrNoBearerToken は BEARER_TOKEN が解決できなかったことを表す。
@@ -40,9 +49,12 @@ var ErrNoBearerToken = errors.New("BEARER_TOKEN が設定されていません")
 
 // DefaultAllowedHosts は Host ヘッダのホスト名として既定で許可する値を返す。
 //
-// サーバは 0.0.0.0 にバインドし（D-08）認証を持たないため、ブラウザ経由の到達を
-// ホスト名で絞る。攻撃者のドメインが 127.0.0.1 へ解決するよう仕込まれても
-// （DNS rebinding）、ブラウザが送る Host ヘッダは攻撃者のドメインのままなので落ちる。
+// サーバは認証を持たないため、ブラウザ経由の到達をホスト名で絞る。
+// 攻撃者のドメインが 127.0.0.1 へ解決するよう仕込まれても（DNS rebinding）、
+// ブラウザが送る Host ヘッダは攻撃者のドメインのままなので落ちる。
+//
+// この検証はバインド先に関わらず必要。DNS rebinding が狙うのは 127.0.0.1 なので、
+// ループバックに絞っても防げない（バインドで防げるのは LAN からの直接アクセスの側）。
 //
 // 呼び出しごとに新しいスライスを返す（パッケージ変数だと呼び出し側から書き換えられる）。
 func DefaultAllowedHosts() []string {
@@ -92,6 +104,7 @@ func parseAllowedHosts(raw string) []string {
 // Config はプロセス全体の設定。環境変数と .env から解決する（D-09）。
 type Config struct {
 	Port             string  // PORT、既定 DefaultPort
+	BindAddr         string  // SEEKX_BIND、既定 defaultBindAddr
 	BearerToken      string  // BEARER_TOKEN（フィクスチャモード以外では必須）
 	APIBaseURL       string  // SEEKX_API_BASE、既定 https://api.x.com/2
 	FixtureDir       string  // SEEKX_FIXTURE_DIR、非空ならフィクスチャモード
@@ -113,12 +126,39 @@ type Config struct {
 func (c Config) FixtureMode() bool { return c.FixtureDir != "" }
 
 // Location は表示・入力に使うタイムゾーンを返す（D-18）。解決できない場合は UTC。
+//
+// 解決できないまま UTC で動くと全時刻表示が黙ってずれるため、起動時に一度だけ
+// LocationError で検知して警告する（ここで警告するとページ描画のたびに出てしまう）。
 func (c Config) Location() *time.Location {
 	loc, err := time.LoadLocation(c.DisplayTZ)
 	if err != nil {
 		return time.UTC
 	}
 	return loc
+}
+
+// LocationError はタイムゾーンを解決できなかった場合にその理由を返す。
+// 解決できる場合は nil。起動時の警告に使う。
+func (c Config) LocationError() error {
+	_, err := time.LoadLocation(c.DisplayTZ)
+	return err
+}
+
+// ListenAddr は ListenAndServe に渡すアドレスを返す。
+// net.JoinHostPort を通すのは、IPv6 リテラル（"::1"）を角括弧で囲む必要があるため。
+func (c Config) ListenAddr() string {
+	return net.JoinHostPort(c.BindAddr, c.Port)
+}
+
+// BindsLoopback はバインド先がループバックかどうかを返す。
+// コンテナ内でループバックに絞るとホストのブラウザから到達できず、原因が分かりにくい。
+// 起動時にその案内を出すかどうかの判定に使う。
+func (c Config) BindsLoopback() bool {
+	if strings.EqualFold(strings.TrimSpace(c.BindAddr), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.TrimSpace(c.BindAddr))
+	return ip != nil && ip.IsLoopback()
 }
 
 // resolvePort は PORT 環境変数を優先し、未設定なら DefaultPort を返す（D-07）。
@@ -232,6 +272,7 @@ func LoadConfig() (Config, error) {
 
 	cfg := Config{
 		Port:             resolvePort(func(k string) string { return lookupEnv(dot, k) }),
+		BindAddr:         strings.TrimSpace(lookupEnv(dot, "SEEKX_BIND")),
 		BearerToken:      lookupEnv(dot, "BEARER_TOKEN"),
 		APIBaseURL:       lookupEnv(dot, "SEEKX_API_BASE"),
 		FixtureDir:       lookupEnv(dot, "SEEKX_FIXTURE_DIR"),
@@ -244,6 +285,9 @@ func LoadConfig() (Config, error) {
 		EnvFile:          envFile,
 		LogLevel:         strings.ToLower(lookupEnv(dot, "SEEKX_LOG_LEVEL")),
 		AllowedHosts:     parseAllowedHosts(lookupEnv(dot, "SEEKX_ALLOWED_HOSTS")),
+	}
+	if cfg.BindAddr == "" {
+		cfg.BindAddr = defaultBindAddr
 	}
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = defaultAPIBaseURL

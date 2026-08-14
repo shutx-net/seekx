@@ -4,7 +4,7 @@ package main
 //
 // なぜ必要か:
 //   - GET /search?mode=execute は課金が発生する唯一の経路（main.go の executeSearch）。
-//     このサーバは認証を持たず 0.0.0.0 にバインドする（D-08）ため、対策が無いと
+//     このサーバは認証を持たないため、対策が無いと
 //     他サイトに置かれた <img src="http://localhost:PORT/search?mode=execute&…"> を
 //     ユーザーのブラウザが読み込むだけで課金が発火する。レスポンスは同一オリジンポリシーで
 //     読めないが、課金そのものは成立してしまう。

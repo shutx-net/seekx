@@ -26,6 +26,11 @@ import (
 	"strings"
 	"time"
 
+	// tzdata をバイナリに同梱する（約 410KB）。システムのタイムゾーンデータベースを
+	// 持たない環境（Windows など）では time.LoadLocation が失敗し、config.Location が
+	// UTC を返すため、全時刻表示が黙ってずれる。ホストで直接動かす場合に効く。
+	_ "time/tzdata"
+
 	"github.com/shutx-net/seekx/internal/config"
 	"github.com/shutx-net/seekx/internal/cost"
 	"github.com/shutx-net/seekx/internal/query"
@@ -68,6 +73,10 @@ func humanInt(n int) string {
 
 var tmpl = template.Must(template.New("").Funcs(templateFuncs).ParseFS(templatesFS, "templates/*.html"))
 
+// version はリリース時に -ldflags で埋め込む（.github/workflows/release.yml）。
+// 手元のビルドでは "dev" のまま。配布したバイナリがどれか分かるようにするための値。
+var version = "dev"
+
 // App は HTTP ハンドラが共有する依存。
 type App struct {
 	cfg     config.Config
@@ -81,6 +90,13 @@ type App struct {
 }
 
 func main() {
+	// 配布したバイナリの版を確かめる手段。設定の読み込みより前に返す。
+	// flag パッケージを使わないのは、既存の起動経路に引数解析を持ち込まないため。
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println("seekx " + version)
+		return
+	}
+
 	cfg, err := config.LoadConfig()
 	// トークン未設定は起動を止めない。設定画面から入力できるため（D-09 の例外）。
 	// それ以外の設定エラー（数値の書式など）は従来どおり致命的に扱う。
@@ -92,6 +108,7 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: config.SlogLevel(cfg.LogLevel)}))
 	log.Info("seekx を起動します",
+		"version", version,
 		"bearer_token", config.MaskToken(cfg.BearerToken),
 		"fixture_mode", cfg.FixtureMode(),
 		"fixture_dir", cfg.FixtureDir,
@@ -100,7 +117,12 @@ func main() {
 		"session_budget_usd", cfg.SessionBudgetUSD,
 		"max_results_cap", cfg.MaxResultsCap,
 		"allowed_hosts", strings.Join(cfg.AllowedHosts, ","),
+		"bind", cfg.BindAddr,
 	)
+	// 解決できないまま起動すると全時刻表示が黙って UTC にずれるので、ここで一度警告する。
+	if err := cfg.LocationError(); err != nil {
+		log.Warn("SEEKX_TZ を解決できないため UTC で表示します", "tz", cfg.DisplayTZ, "err", err)
+	}
 	if cfg.FixtureMode() {
 		log.Info("フィクスチャモードです。X API は呼び出されません（課金 0）", "dir", cfg.FixtureDir)
 	}
@@ -120,11 +142,17 @@ func main() {
 		now:     time.Now,
 	}
 
-	// 0.0.0.0 にバインドする。127.0.0.1 はコンテナ外（ホスト）から到達できない（D-08 / P-BIND-0000）。
-	addr := "0.0.0.0:" + cfg.Port
+	// 既定はループバック。広く開けるほう（コンテナ）を明示させる向きにしている。
+	// devcontainer は containerEnv で SEEKX_BIND=0.0.0.0 を渡す。
+	addr := cfg.ListenAddr()
 	log.Info("listening", "addr", addr,
-		"note", "devcontainer.json の forwardPorts と一致しているか確認してください",
+		"note", "コンテナで動かす場合は devcontainer.json の forwardPorts と一致しているか確認してください",
 		"url", "http://localhost:"+cfg.Port+"/")
+	// コンテナ内でループバックに絞るとホストのブラウザから到達できない。
+	// 症状（ページが開かない）から原因にたどり着けるよう、ここで案内しておく。
+	if cfg.BindsLoopback() {
+		log.Info("ループバックにのみバインドしています。コンテナで動かしていてホストのブラウザから開けない場合は SEEKX_BIND=0.0.0.0 を指定してください")
+	}
 
 	srv := &http.Server{
 		Addr:              addr,
