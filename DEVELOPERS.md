@@ -79,7 +79,6 @@ devcontainer 経由で回す場合は各行の前に
 | `PORT` | `5050` | 待ち受けポート。 |
 | `SEEKX_FIXTURE_DIR` | （空） | 設定すると API を叩かず、そのディレクトリの JSON を返します（**課金ゼロ**）。 |
 | `SEEKX_TZ` | `Asia/Tokyo` | 入力・表示のタイムゾーン。 |
-| `SEEKX_SESSION_BUDGET_USD` | `5.00` | セッション累計コストの上限。超えると実行を停止します。 |
 | `SEEKX_MAX_RESULTS_CAP` | `100` | 画面に出す取得件数の上限。 |
 | `SEEKX_ALLOW_OVER_CAP` | （未設定） | `1` にすると月次 cap 95% 超でも実行できます。 |
 

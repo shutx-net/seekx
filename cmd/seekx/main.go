@@ -114,7 +114,6 @@ func main() {
 		"fixture_dir", cfg.FixtureDir,
 		"api_base", cfg.APIBaseURL,
 		"tz", cfg.DisplayTZ,
-		"session_budget_usd", cfg.SessionBudgetUSD,
 		"max_results_cap", cfg.MaxResultsCap,
 		"allowed_hosts", strings.Join(cfg.AllowedHosts, ","),
 		"bind", cfg.BindAddr,
@@ -653,8 +652,9 @@ func (a *App) handleClearToken(w http.ResponseWriter, r *http.Request) {
 // applyToken は tokenStore の現在値を Client に反映する。
 //
 // トークンが実際に変わったときはセッション累計も 0 に戻す。別アカウントの支出を
-// 1 つの累計に混ぜると予算ガードの判定が狂うため（usage キャッシュの破棄は
-// Client.SetToken の側で行われる）。同じ値を入れ直しただけなら累計は維持する。
+// 1 つの累計に混ぜると、画面のセッション累計がどちらの支出でもない値になるため
+// （usage キャッシュの破棄は Client.SetToken の側で行われる）。
+// 同じ値を入れ直しただけなら累計は維持する。
 //
 // トークンの差し替えはこの 1 箇所に集約する。反映と破棄がばらけると必ず片方を忘れる。
 func (a *App) applyToken(changed bool) {
@@ -741,7 +741,7 @@ func (a *App) handleEstimate(w http.ResponseWriter, r *http.Request, f query.Sea
 	est.Buckets = counts.Data
 	est.CountsCostUSD = cost.CountsCostFor(params.Endpoint)
 
-	allowed, reason := cost.GateAllows(cap, a.session, est, a.cfg)
+	allowed, reason := cost.GateAllows(cap, a.cfg)
 
 	p := EstimatePage{
 		Page:          a.page("見積り", cap, params.Endpoint),
@@ -772,14 +772,11 @@ func (a *App) handleExecute(w http.ResponseWriter, r *http.Request, f query.Sear
 	ctx := r.Context()
 	cap := a.capStatus(ctx)
 
-	// 総件数は不明なので max_results を上限として見積り、ゲートを通す。
-	est := cost.EstimateSearch(params.MaxResults, params.MaxResults)
-	if allowed, reason := cost.GateAllows(cap, a.session, est, a.cfg); !allowed {
+	if allowed, reason := cost.GateAllows(cap, a.cfg); !allowed {
 		a.log.Warn("実行をゲートで停止しました", "reason", reason)
 		a.renderError(w, r, http.StatusForbidden, xapi.KindUsageCap.Title(), reason,
 			[]string{
-				"月次 cap の場合: リセット日を待つか SEEKX_ALLOW_OVER_CAP=1 を設定して再起動してください。",
-				"セッション予算の場合: SEEKX_SESSION_BUDGET_USD を上げて再起動してください。",
+				"リセット日を待つか、SEEKX_ALLOW_OVER_CAP=1 を設定して再起動してください。",
 				"取得件数を減らすと 1 回あたりのコストが下がります。",
 			}, f)
 		return
@@ -813,8 +810,7 @@ func (a *App) handleExecute(w http.ResponseWriter, r *http.Request, f query.Sear
 	result.StartDisplay, result.EndDisplay = a.displayRange(params.StartTime, params.EndTime, params.Endpoint)
 	result.Warnings = append(warningMessages(warns), result.Warnings...)
 
-	pagingEst := cost.EstimateSearch(params.MaxResults, params.MaxResults)
-	pagingAllowed, pagingReason := cost.GateAllows(cap, a.session, pagingEst, a.cfg)
+	pagingAllowed, pagingReason := cost.GateAllows(cap, a.cfg)
 
 	p := ResultsPage{
 		Page:           a.page("検索結果", cap, params.Endpoint),
@@ -1063,7 +1059,7 @@ func errorSteps(k xapi.ErrorKind) []string {
 			"API のレスポンス形式が変わった可能性があります（フィールド名の変更）。",
 		}
 	case xapi.KindUsageCap:
-		return []string{"月次 cap またはセッション予算の設定を見直してください。"}
+		return []string{"月次 cap の設定を見直してください（SEEKX_ALLOW_OVER_CAP）。"}
 	default:
 		return nil
 	}

@@ -180,7 +180,7 @@ func TestSettingsTokenValidation(t *testing.T) {
 
 // TestSettingsTokenChangeResetsSessionAndUsage はトークン差し替え時に
 // セッション累計と usage キャッシュを捨てることを確認する。
-// 別アカウントの消費が混ざると予算ガードと cap 表示が狂う。
+// 別アカウントの消費が混ざると累計と cap の表示が狂う。
 func TestSettingsTokenChangeResetsSessionAndUsage(t *testing.T) {
 	usageCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -223,7 +223,7 @@ func TestSettingsTokenChangeResetsSessionAndUsage(t *testing.T) {
 }
 
 // TestSettingsSameTokenKeepsSession は同じ値を入れ直しただけなら
-// セッション累計を維持することを確認する（予算ガードの抜け穴にしない）。
+// セッション累計を維持することを確認する（表示を無言でリセットしない）。
 func TestSettingsSameTokenKeepsSession(t *testing.T) {
 	app := testApp(t, config.Config{BearerToken: sampleToken, APIBaseURL: "http://127.0.0.1:1/unused"})
 	router := newRouter(app)

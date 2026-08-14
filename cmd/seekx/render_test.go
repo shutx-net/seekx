@@ -80,9 +80,6 @@ func testApp(t *testing.T, cfg config.Config) *App {
 	if cfg.MaxResultsCap == 0 {
 		cfg.MaxResultsCap = 100
 	}
-	if cfg.SessionBudgetUSD == 0 {
-		cfg.SessionBudgetUSD = 5.0
-	}
 	log := discardLogger()
 	opts := clientOptions(cfg)
 	opts.Sleep = func(time.Duration) {} // テストで実時間を待たない（リトライ・ペーシング）
@@ -291,7 +288,7 @@ func TestRenderTemplates(t *testing.T) {
 			Result:        v,
 			NextURL:       "/search?mode=execute&token=abc",
 			PagingBlocked: true,
-			PagingReason:  "セッション予算を超えました。",
+			PagingReason:  "月次上限を超えました。",
 			FormURL:       "/",
 		}
 		out := mustRender(t, app, "results.html", p)
@@ -708,7 +705,9 @@ func parseQueryOf(target string) (url.Values, error) {
 	return req.URL.Query(), nil
 }
 
-// TestExecuteSearchIsOnlyBillingPath は課金経路がゲートを通ることを確認する。
+// TestExecuteSearchIsOnlyBillingPath はゲートが閉じているときに課金経路が
+// API を呼ばないことを確認する。ゲートの条件は月次 cap の Block だけ
+// （セッション予算の上限は廃止した）。
 func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 	searchCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -716,14 +715,18 @@ func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/tweets/search/") {
 			searchCalls++
 		}
+		if strings.HasPrefix(r.URL.Path, "/usage/tweets") {
+			// 96% 消費。cap Block の閾値（95%）を超えるのでゲートが閉じる。
+			_, _ = w.Write([]byte(`{"data":{"project_id":"1","project_cap":"2000000","project_usage":1920000,"cap_reset_day":12}}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"data":[],"meta":{"result_count":0}}`))
 	}))
 	defer srv.Close()
 
-	app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL, SessionBudgetUSD: 0.001})
+	app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
 	router := newRouter(app)
 
-	// セッション予算 $0.001 では max_results=10（最大 $0.15）が通らない。
 	req := newTestRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=execute", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -734,7 +737,7 @@ func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 	if searchCalls != 0 {
 		t.Errorf("ゲート不成立時に検索 API を呼んではいけない: searchCalls=%d", searchCalls)
 	}
-	if !strings.Contains(rec.Body.String(), "セッション") {
+	if !strings.Contains(rec.Body.String(), "月次上限") {
 		t.Errorf("理由が表示されていない: %s", truncate(rec.Body.String(), 300))
 	}
 }

@@ -122,8 +122,8 @@ func TestRequestGuardBlocksCrossSiteBilling(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// 予算は十分（max=10 の最大コストは $0.15）。止まるとすれば guard の判断だけ。
-	app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL, SessionBudgetUSD: 5.0})
+	// 課金ゲートは月次 cap だけを見る。止まるとすれば guard の判断だけ。
+	app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
 	router := newRouter(app)
 	const target = "/search?kw=%E7%8C%AB&max=10&mode=execute"
 	localPort := "localhost:" + config.DefaultPort
@@ -137,7 +137,7 @@ func TestRequestGuardBlocksCrossSiteBilling(t *testing.T) {
 	if searchCalls != 0 {
 		t.Errorf("他サイト起点で検索 API を呼んではいけない: searchCalls=%d", searchCalls)
 	}
-	// 予算ゲートの 403 と取り違えていないことを本文で区別する。
+	// cap ゲートの 403 と取り違えていないことを本文で区別する。
 	if !strings.Contains(rec.Body.String(), "SEEKX_ALLOWED_HOSTS") {
 		t.Errorf("guard 以外の理由で 403 になっている可能性がある: %s", truncate(rec.Body.String(), 300))
 	}

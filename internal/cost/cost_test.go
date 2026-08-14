@@ -179,10 +179,10 @@ func TestEvaluateCap(t *testing.T) {
 }
 
 func TestGateAllows(t *testing.T) {
-	baseCfg := config.Config{SessionBudgetUSD: 5.00}
+	baseCfg := config.Config{}
 
 	t.Run("通常は許可", func(t *testing.T) {
-		ok, reason := GateAllows(EvaluateCap(usageResp(42, 2000000, 12)), &SessionSpend{}, EstimateSearch(10, 10), baseCfg)
+		ok, reason := GateAllows(EvaluateCap(usageResp(42, 2000000, 12)), baseCfg)
 		if !ok {
 			t.Errorf("許可されるべき: %s", reason)
 		}
@@ -192,7 +192,7 @@ func TestGateAllows(t *testing.T) {
 	})
 
 	t.Run("cap Block は停止する", func(t *testing.T) {
-		ok, reason := GateAllows(EvaluateCap(usageResp(1920000, 2000000, 12)), &SessionSpend{}, EstimateSearch(10, 10), baseCfg)
+		ok, reason := GateAllows(EvaluateCap(usageResp(1920000, 2000000, 12)), baseCfg)
 		if ok {
 			t.Fatal("停止すべき")
 		}
@@ -207,64 +207,21 @@ func TestGateAllows(t *testing.T) {
 	t.Run("SEEKX_ALLOW_OVER_CAP=1 で cap Block を解除できる", func(t *testing.T) {
 		cfg := baseCfg
 		cfg.AllowOverCap = true
-		ok, reason := GateAllows(EvaluateCap(usageResp(1920000, 2000000, 12)), &SessionSpend{}, EstimateSearch(10, 10), cfg)
+		ok, reason := GateAllows(EvaluateCap(usageResp(1920000, 2000000, 12)), cfg)
 		if !ok {
 			t.Errorf("解除されるべき: %s", reason)
 		}
 	})
 
 	t.Run("cap Warn は停止しない", func(t *testing.T) {
-		ok, _ := GateAllows(EvaluateCap(usageResp(1700000, 2000000, 12)), &SessionSpend{}, EstimateSearch(10, 10), baseCfg)
+		ok, _ := GateAllows(EvaluateCap(usageResp(1700000, 2000000, 12)), baseCfg)
 		if !ok {
 			t.Error("Warn では止めない")
 		}
 	})
 
-	t.Run("セッション予算超過で停止する", func(t *testing.T) {
-		s := &SessionSpend{}
-		s.Add(5.00)
-		ok, reason := GateAllows(EvaluateCap(usageResp(42, 2000000, 12)), s, EstimateSearch(10, 10), baseCfg)
-		if ok {
-			t.Fatal("停止すべき")
-		}
-		if !strings.Contains(reason, "SEEKX_SESSION_BUDGET_USD") {
-			t.Errorf("理由: %q", reason)
-		}
-	})
-
-	t.Run("見積り最大額が残予算を超えると停止する", func(t *testing.T) {
-		s := &SessionSpend{}
-		s.Add(4.95) // 残 $0.05。max_results=100 の最大 $1.50 は通らない
-		ok, reason := GateAllows(EvaluateCap(usageResp(42, 2000000, 12)), s, EstimateSearch(10000, 100), baseCfg)
-		if ok {
-			t.Fatal("停止すべき")
-		}
-		if !strings.Contains(reason, "残予算") {
-			t.Errorf("理由: %q", reason)
-		}
-	})
-
-	t.Run("残予算内なら許可", func(t *testing.T) {
-		s := &SessionSpend{}
-		s.Add(1.00)
-		ok, reason := GateAllows(EvaluateCap(usageResp(42, 2000000, 12)), s, EstimateSearch(10, 10), baseCfg)
-		if !ok {
-			t.Errorf("許可されるべき: %s", reason)
-		}
-	})
-
-	t.Run("予算 0 は無制限として扱う", func(t *testing.T) {
-		cfg := config.Config{SessionBudgetUSD: 0}
-		s := &SessionSpend{}
-		s.Add(100)
-		ok, _ := GateAllows(EvaluateCap(usageResp(42, 2000000, 12)), s, EstimateSearch(10, 10), cfg)
-		if !ok {
-			t.Error("予算 0（未設定扱い）では止めない")
-		}
-	})
-
 	t.Run("usage 不明でも検索は止めない", func(t *testing.T) {
-		ok, reason := GateAllows(EvaluateCap(nil), &SessionSpend{}, EstimateSearch(10, 10), baseCfg)
+		ok, reason := GateAllows(EvaluateCap(nil), baseCfg)
 		if !ok {
 			t.Errorf("止めるべきではない: %s", reason)
 		}

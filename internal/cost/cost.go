@@ -148,8 +148,8 @@ func (s *SessionSpend) Add(usd float64) {
 }
 
 // Reset は累計を 0 に戻す。Bearer Token を差し替えたときに使う。
-// 別アカウントの支出を 1 つのセッション累計に混ぜると、GateAllows の判定が
-// 両方向に狂う（過大にも過小にもなる）。
+// 別アカウントの支出を 1 つの累計に混ぜると、画面に出る「セッション累計」が
+// どちらのアカウントの支出でもない値になる。
 func (s *SessionSpend) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -169,32 +169,16 @@ func (s *SessionSpend) CallCount() int {
 	return s.Calls
 }
 
-// GateAllows は課金経路を通してよいかを判定する（cost_control.budget_guard）。
-// cap Block / セッション予算超過 / 見積り最大額が残予算を超える場合に false と日本語理由を返す。
-func GateAllows(cap CapStatus, session *SessionSpend, est Estimate, cfg config.Config) (bool, string) {
+// GateAllows は課金経路を通してよいかを判定する。月次 cap が Block のときだけ
+// false と日本語理由を返す。
+//
+// セッション累計に対する上限は持たない。プロセス単位のブレーキは再起動で 0 に戻るため
+// 支出の天井として機能せず、「止まったら再起動する」を促すだけだった。累計は表示に使う。
+func GateAllows(cap CapStatus, cfg config.Config) (bool, string) {
 	if cap.Level == CapBlock && !cfg.AllowOverCap {
 		return false, fmt.Sprintf(
 			"月次上限の %.1f%% を消費しているため実行を停止しました（%d / %d post reads）。cap は毎月 %d 日にリセットされます。続行するには SEEKX_ALLOW_OVER_CAP=1 を設定して再起動してください。",
 			cap.Percent(), cap.Usage, cap.Cap, cap.ResetDay)
-	}
-
-	spent := 0.0
-	if session != nil {
-		spent = session.Total()
-	}
-	budget := cfg.SessionBudgetUSD
-	if budget <= 0 {
-		return true, ""
-	}
-	if spent >= budget {
-		return false, fmt.Sprintf(
-			"このセッションで $%.2f を超えました（累計 $%.3f）。続けるには SEEKX_SESSION_BUDGET_USD を上げて再起動してください。",
-			budget, spent)
-	}
-	if est.TotalMaxUSD > 0 && spent+est.TotalMaxUSD > budget {
-		return false, fmt.Sprintf(
-			"この検索の最大コスト $%.3f はセッション残予算 $%.3f を超えます（上限 $%.2f）。取得件数を減らすか SEEKX_SESSION_BUDGET_USD を上げてください。",
-			est.TotalMaxUSD, budget-spent, budget)
 	}
 	return true, ""
 }

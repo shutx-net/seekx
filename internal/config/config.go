@@ -25,11 +25,10 @@ import (
 const DefaultPort = "5050"
 
 const (
-	defaultAPIBaseURL       = "https://api.x.com/2"
-	defaultSessionBudgetUSD = 5.00
-	defaultMaxResultsCap    = 100
-	defaultDisplayTZ        = "Asia/Tokyo"
-	defaultEnvFile          = ".env"
+	defaultAPIBaseURL    = "https://api.x.com/2"
+	defaultMaxResultsCap = 100
+	defaultDisplayTZ     = "Asia/Tokyo"
+	defaultEnvFile       = ".env"
 
 	// defaultBindAddr はループバックに絞る。安全な側を既定にするため。
 	// ホストで直接動かす場合はこれで届き、LAN からは TCP レベルで到達できない。
@@ -103,19 +102,18 @@ func parseAllowedHosts(raw string) []string {
 
 // Config はプロセス全体の設定。環境変数と .env から解決する（D-09）。
 type Config struct {
-	Port             string  // PORT、既定 DefaultPort
-	BindAddr         string  // SEEKX_BIND、既定 defaultBindAddr
-	BearerToken      string  // BEARER_TOKEN（フィクスチャモード以外では必須）
-	APIBaseURL       string  // SEEKX_API_BASE、既定 https://api.x.com/2
-	FixtureDir       string  // SEEKX_FIXTURE_DIR、非空ならフィクスチャモード
-	FixtureFile      string  // SEEKX_FIXTURE_FILE、個別上書き
-	RawDumpDir       string  // SEEKX_RAW_DUMP_DIR、非空なら生レスポンスを保存（フィクスチャ作成用）
-	SessionBudgetUSD float64 // SEEKX_SESSION_BUDGET_USD、既定 5.00
-	AllowOverCap     bool    // SEEKX_ALLOW_OVER_CAP=1 で cap 95% 超でも実行許可
-	MaxResultsCap    int     // SEEKX_MAX_RESULTS_CAP、既定 100
-	DisplayTZ        string  // SEEKX_TZ、既定 Asia/Tokyo
-	EnvFile          string  // SEEKX_ENV_FILE、既定 .env
-	LogLevel         string  // SEEKX_LOG_LEVEL、既定 info
+	Port          string // PORT、既定 DefaultPort
+	BindAddr      string // SEEKX_BIND、既定 defaultBindAddr
+	BearerToken   string // BEARER_TOKEN（フィクスチャモード以外では必須）
+	APIBaseURL    string // SEEKX_API_BASE、既定 https://api.x.com/2
+	FixtureDir    string // SEEKX_FIXTURE_DIR、非空ならフィクスチャモード
+	FixtureFile   string // SEEKX_FIXTURE_FILE、個別上書き
+	RawDumpDir    string // SEEKX_RAW_DUMP_DIR、非空なら生レスポンスを保存（フィクスチャ作成用）
+	AllowOverCap  bool   // SEEKX_ALLOW_OVER_CAP=1 で cap 95% 超でも実行許可
+	MaxResultsCap int    // SEEKX_MAX_RESULTS_CAP、既定 100
+	DisplayTZ     string // SEEKX_TZ、既定 Asia/Tokyo
+	EnvFile       string // SEEKX_ENV_FILE、既定 .env
+	LogLevel      string // SEEKX_LOG_LEVEL、既定 info
 
 	// AllowedHosts は Host ヘッダとして受け付けるホスト名。
 	// DefaultAllowedHosts に SEEKX_ALLOWED_HOSTS を追加したもの。
@@ -271,20 +269,19 @@ func LoadConfig() (Config, error) {
 	}
 
 	cfg := Config{
-		Port:             resolvePort(func(k string) string { return lookupEnv(dot, k) }),
-		BindAddr:         strings.TrimSpace(lookupEnv(dot, "SEEKX_BIND")),
-		BearerToken:      lookupEnv(dot, "BEARER_TOKEN"),
-		APIBaseURL:       lookupEnv(dot, "SEEKX_API_BASE"),
-		FixtureDir:       lookupEnv(dot, "SEEKX_FIXTURE_DIR"),
-		FixtureFile:      lookupEnv(dot, "SEEKX_FIXTURE_FILE"),
-		RawDumpDir:       lookupEnv(dot, "SEEKX_RAW_DUMP_DIR"),
-		SessionBudgetUSD: defaultSessionBudgetUSD,
-		AllowOverCap:     lookupEnv(dot, "SEEKX_ALLOW_OVER_CAP") == "1",
-		MaxResultsCap:    defaultMaxResultsCap,
-		DisplayTZ:        lookupEnv(dot, "SEEKX_TZ"),
-		EnvFile:          envFile,
-		LogLevel:         strings.ToLower(lookupEnv(dot, "SEEKX_LOG_LEVEL")),
-		AllowedHosts:     parseAllowedHosts(lookupEnv(dot, "SEEKX_ALLOWED_HOSTS")),
+		Port:          resolvePort(func(k string) string { return lookupEnv(dot, k) }),
+		BindAddr:      strings.TrimSpace(lookupEnv(dot, "SEEKX_BIND")),
+		BearerToken:   lookupEnv(dot, "BEARER_TOKEN"),
+		APIBaseURL:    lookupEnv(dot, "SEEKX_API_BASE"),
+		FixtureDir:    lookupEnv(dot, "SEEKX_FIXTURE_DIR"),
+		FixtureFile:   lookupEnv(dot, "SEEKX_FIXTURE_FILE"),
+		RawDumpDir:    lookupEnv(dot, "SEEKX_RAW_DUMP_DIR"),
+		AllowOverCap:  lookupEnv(dot, "SEEKX_ALLOW_OVER_CAP") == "1",
+		MaxResultsCap: defaultMaxResultsCap,
+		DisplayTZ:     lookupEnv(dot, "SEEKX_TZ"),
+		EnvFile:       envFile,
+		LogLevel:      strings.ToLower(lookupEnv(dot, "SEEKX_LOG_LEVEL")),
+		AllowedHosts:  parseAllowedHosts(lookupEnv(dot, "SEEKX_ALLOWED_HOSTS")),
 	}
 	if cfg.BindAddr == "" {
 		cfg.BindAddr = defaultBindAddr
@@ -298,13 +295,6 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
-	}
-	if v := lookupEnv(dot, "SEEKX_SESSION_BUDGET_USD"); v != "" {
-		f, err := strconv.ParseFloat(v, 64)
-		if err != nil || f < 0 {
-			return Config{}, fmt.Errorf("SEEKX_SESSION_BUDGET_USD は 0 以上の数値で指定してください")
-		}
-		cfg.SessionBudgetUSD = f
 	}
 	if v := lookupEnv(dot, "SEEKX_MAX_RESULTS_CAP"); v != "" {
 		n, err := strconv.Atoi(v)

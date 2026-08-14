@@ -230,7 +230,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	t.Setenv("SEEKX_ENV_FILE", p)
 	// 実環境の値がテストに漏れ込まないようにする。
 	for _, k := range []string{"PORT", "BEARER_TOKEN", "SEEKX_API_BASE", "SEEKX_FIXTURE_DIR",
-		"SEEKX_FIXTURE_FILE", "SEEKX_SESSION_BUDGET_USD", "SEEKX_ALLOW_OVER_CAP",
+		"SEEKX_FIXTURE_FILE", "SEEKX_ALLOW_OVER_CAP",
 		"SEEKX_MAX_RESULTS_CAP", "SEEKX_TZ", "SEEKX_LOG_LEVEL"} {
 		t.Setenv(k, "")
 	}
@@ -244,9 +244,6 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	if cfg.APIBaseURL != "https://api.x.com/2" {
 		t.Errorf("APIBaseURL: got %q", cfg.APIBaseURL)
-	}
-	if cfg.SessionBudgetUSD != 5.00 {
-		t.Errorf("SessionBudgetUSD: got %v", cfg.SessionBudgetUSD)
 	}
 	if cfg.MaxResultsCap != 100 {
 		t.Errorf("MaxResultsCap: got %v", cfg.MaxResultsCap)
