@@ -77,6 +77,13 @@ git push origin v0.1.0
 - `ci.yml` はタグ push では走りません。壊れたバイナリを配らないよう、`release.yml` 側でも
   同じ検証（build / vet / gofmt / test -race）を通してからビルドします。
 - 第三者 action は使わず、Release の作成は runner 同梱の `gh` CLI で行います。
+- **Release が既にある場合はアセットを添付するだけにします。** GitHub の UI から Release を
+  作るとその時点でタグも作られ、それがこの workflow を起動します。「Release が先にあって
+  タグ push が後から来る」順序は普通に起きるので、`gh release create` 一本だと必ず衝突します。
+  既存の Release のタイトルと本文は書き換えません（UI で書いた内容を残すため）。
+- 失敗したリリースは `workflow_dispatch`（タグ名を入力）でやり直せます。タグを打ち直す必要は
+  ありません。`workflow_dispatch` は既定ブランチの workflow ファイルで動くため、
+  `release.yml` を直せば過去のタグに対しても直した手順で再実行できます。
 
 ## パッケージ構成
 

@@ -9,6 +9,14 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # 失敗したリリースをやり直すための手動トリガー。タグを打ち直さずに済む。
+  # workflow_dispatch は既定ブランチの workflow ファイルで動くため、
+  # ここを直せば過去のタグに対しても直した手順で再実行できる。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "リリースするタグ（例: v0.1.0）"
+        required: true
 
 # Release の作成にはリポジトリへの書き込みが要る。
 permissions:
@@ -19,9 +27,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # タグ push のときは github.ref_name（タグ名）、手動実行のときは入力のタグ。
+    env:
+      VERSION: ${{ inputs.tag || github.ref_name }}
+
     steps:
       - name: checkout
         uses: actions/checkout@v4
+        with:
+          # 手動実行でも、そのタグ時点のコードをビルドする。
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: setup Go
         uses: actions/setup-go@v5
@@ -56,7 +71,6 @@ jobs:
       - name: build
         env:
           CGO_ENABLED: "0"
-          VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p dist
           for target in \
@@ -92,13 +106,24 @@ jobs:
           cat checksums.txt
 
       # gh は runner に同梱されている。第三者 action を増やさないために CLI を使う。
-      # タグ名は ${{ }} で直接展開せず env 経由で渡す（run へのスクリプト注入を避ける）。
-      - name: create release
+      # タグ名は ${{ }} で run に直接展開せず env 経由で渡す（スクリプト注入を避ける）。
+      #
+      # Release が既にある場合はアセットを足すだけにする。GitHub の UI から Release を
+      # 作るとその時点でタグも作られ、それがこの workflow を起動する。つまり
+      # 「Release が先にあってタグ push が後から来る」順序が普通に起きるので、
+      # gh release create 一本だと必ず衝突する（実際に v0.1.0 で踏んだ）。
+      # 既存の Release のタイトルと本文は書き換えない。UI で書いた内容を尊重する。
+      - name: create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ github.ref_name }}
         run: |
-          gh release create "$VERSION" \
-            --title "$VERSION" \
-            --generate-notes \
-            dist/*
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION は既にあります。アセットを添付します。"
+            gh release upload "$VERSION" dist/* --clobber
+          else
+            echo "Release $VERSION を作成します。"
+            gh release create "$VERSION" \
+              --title "$VERSION" \
+              --generate-notes \
+              dist/*
+          fi
