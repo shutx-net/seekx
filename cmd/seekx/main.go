@@ -272,6 +272,13 @@ type Page struct {
 	SettingsURL     string
 }
 
+// PageID は <html data-page> に出す識別子。CSS がページ種別でレイアウトを変えるために使う。
+// 既定は空で、必要なページだけがメソッドを上書きする（ResultsPage）。
+//
+// フィールドではなくメソッドで持つのは、ハンドラ側で設定を忘れられないようにするため。
+// テンプレートを直接描画するテストでも必ず正しい値が付く。
+func (Page) PageID() string { return "" }
+
 // SettingsPage は設定画面。トークンの値は渡さない（マスク表示のみ）。
 type SettingsPage struct {
 	Page
@@ -352,6 +359,10 @@ type ResultsPage struct {
 	EmptyHints     []string
 	RateLimitReset string
 }
+
+// PageID は結果ページであることを CSS に伝える（#17）。サーバが出す属性なので、
+// サイドバーぶんの横幅は JS の有無に関係なく効く。
+func (ResultsPage) PageID() string { return "results" }
 
 type ErrorPage struct {
 	Page

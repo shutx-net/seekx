@@ -18,7 +18,15 @@
   --ok-bg: #e8f5fe;
   --radius: 12px;
   --gap: 12px;
-  --max: 680px;
+  /* --list-max はカード領域の最大幅、--max はページ全体（main / .site-header / .banner /
+     .site-footer が共有）の最大幅。サイドバーが無いページでは両者は同じで、
+     結果ページだけ --max がサイドバーぶん広がる（下の :root[data-page="results"]）。
+     --list-max-wide は 3 列時のカード領域。3 列の指定と、列数に依らない
+     ページ幅の基準の両方がこれを参照する（値を 2 か所に書かない）。 */
+  --list-max: 680px;
+  --list-max-wide: 1320px;
+  --side-w: 400px;
+  --max: var(--list-max);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -449,19 +457,38 @@ a.author-name:hover { text-decoration: underline; }
 :root[data-cols="2"] .post-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 :root[data-cols="3"] .post-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
-/* 2 列以上では本文カラム幅 680px では狭すぎる。--max は main / .site-header /
-   .banner / .site-footer が共有する単一情報源なので、これを上書きして
-   ページ全体の幅を揃えて広げる（D-42）。width ではなく max-width の上書きなので
-   狭い画面では自動的に無効になり、横スクロールを生まない。 */
-:root[data-cols="2"] { --max: 1000px; }
-:root[data-cols="3"] { --max: 1320px; }
+/* 2 列以上では本文カラム幅 680px では狭すぎる。カード領域の幅を広げると、それを含む
+   --max（ページ全体の幅）も自動的に追従する（D-42）。width ではなく max-width の
+   上書きなので、狭い画面では自動的に無効になり横スクロールを生まない。 */
+:root[data-cols="2"] { --list-max: 1000px; }
+:root[data-cols="3"] { --list-max: var(--list-max-wide); }
 
 /* 狭い画面では保存済みの選択を尊重したまま描画上の列数だけを減らす（D-44）。
-   コントロールを disabled にはしない。 */
-@media (max-width: 1039px) {
+   コントロールを disabled にはしない。
+
+   【閾値は 2 系統ある。】サイドバー（#17）が積まれている 1024px 未満では、カードが
+   画面の全幅を使えるのでサイドバー無しの値で判断する。横に並ぶ 1024px 以上では、
+   サイドバーが占める --side-w 400px + --gap 12px に main の左右 padding 24px を
+   足した 436px を引いた残りで判断する:
+     3 列に必要なカード領域 1016px → 1016 + 436 = 1452px
+     2 列に必要なカード領域  696px →  696 + 436 = 1132px
+   1 系統にまとめて 1132px だけで判断すると、積んでいる 720〜1023px でカードが全幅
+   （約 1000px）あるのに 1 列に落ちてしまう。 */
+
+/* サイドバーを積んでいるとき。3 列にはカード領域 1016px が要るので 1024px 未満では出せない。 */
+@media (max-width: 1023px) {
   :root[data-cols="3"] .post-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 719px) {
+  :root[data-cols="2"] .post-list,
+  :root[data-cols="3"] .post-list { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* サイドバーが横に並んでいるとき。 */
+@media (min-width: 1024px) and (max-width: 1451px) {
+  :root[data-cols="3"] .post-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) and (max-width: 1131px) {
   :root[data-cols="2"] .post-list,
   :root[data-cols="3"] .post-list { grid-template-columns: minmax(0, 1fr); }
 }
@@ -470,12 +497,47 @@ a.author-name:hover { text-decoration: underline; }
    将来 .post に display 系の指定が入っても絞り込みが無言で壊れないようにする（D-51）。 */
 [hidden] { display: none !important; }
 
+/* ---------- 結果ページの 2 カラム（#17） ---------- */
+
+/* 結果ページだけ、サイドバーのぶんページ全体を広げる。カードを狭めてサイドバーを
+   捻出すると 3 列で 1 枚 340px 程度になり窮屈なため、広げる側を選んだ。
+   data-page はサーバが出す属性なので、JS の有無に関係なく効く。
+
+   【ここに --list-max（列数で変わる）を使ってはいけない。】main / .site-header /
+   .banner / .site-footer はこの幅で中央寄せされているので、列数で幅が変わると
+   ページの左端が横に飛び、列数を切り替えるたびにサイドバーが動く。
+   列数に依らない --list-max-wide（＝3 列時の幅）で固定し、列数が少ないときの余りは
+   カード列の右側に残す（下の .results-main の max-width）。 */
+:root[data-page="results"] { --max: calc(var(--list-max-wide) + var(--side-w) + var(--gap)); }
+
+.results-layout {
+  display: grid;
+  gap: var(--gap);
+  /* 狭い画面ではサイドバーをカードの上に積む。 */
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* サイドバーの中は gap で間隔を持つ。子の縦マージンが残ると二重になるので落とす。 */
+.results-side {
+  display: grid;
+  gap: var(--gap);
+  align-content: start;
+}
+
+.results-side > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* トラック側の minmax(0, ...) と対になる保険。これが無いと長い URL やメディアが
+   カード列を押し広げて横スクロールを生む（D-38 / P-GRID-1FR）。 */
+.results-main { min-width: 0; }
+
 /* ---------- 一覧コントロール（列数・絞り込み） ---------- */
 
 .list-controls {
   display: grid;
   gap: var(--gap);
-  margin: 0 0 var(--gap);
 }
 
 /* ---------- 列数の切り替え（アイコン） ---------- */
@@ -540,23 +602,23 @@ a.author-name:hover { text-decoration: underline; }
 
 /* ---------- 上部固定（スクロール中も見えるようにする） ---------- */
 
-/* 固定するのは .site-header（セッション累計・月次 cap）と #list-controls
-   （列数切り替え・絞り込みバッジ）だけ。.query-box / .meta-list / 注意文 /
-   ページングリンクは流す。ページングは金額付きリンクなので、常時見える位置に
-   固定すると誤クリックを招く。
+/* 固定するのは .site-header（セッション累計・月次 cap）と .results-side
+   （クエリ・メタ情報・列数切り替え・絞り込み）だけ。カード列（.results-main）は流す。
+   ページングと再見積りは .results-main に置いてある。どちらも金額付きのリンクなので、
+   常時見える位置に固定すると誤クリックを招く（#3）。
 
-   この 2 つは DOM 上で隣接していない（間に .query-box / .meta-list / .notice が入る）。
-   CSS には「直前の sticky 要素の下に貼り付く」という指定が無いため、
-   #list-controls の top にヘッダの高さを渡す必要がある。
-   --header-h は【JS がヘッダの実高さを実測して上書きする】（layout.html の syncHeaderH）。
+   この 2 つは DOM 上で隣接していない（間に <h1> が入る）。CSS には「直前の sticky 要素の
+   下に貼り付く」という指定が無いため、.results-side の top にヘッダの高さを渡す必要がある。
+   --header-h は【JS がヘッダの実高さを実測して上書きする】（static/js/app.js の syncHeaderH）。
    ここの値は JS が走る前の初期値にすぎず、位置がズレたまま一瞬描画されるのを防ぐためだけにある。
 
    【min-height: var(--header-h) を書いてはいけない。】
    JS が同じ変数へ実測値を書くため、min-height がそれを読むとラチェットになる:
    ヘッダが折り返して 65px になると min-height: 65px が焼き付き、内容が減って
    自然高が戻っても縮まなくなる（高さが増える方向にしか動かない）。
-   なお #list-controls は JS が hidden を外すまで表示されないので、JS 無効時に
-   この値が使われる場面は無く、フォールバックとしての min-height も不要。 */
+
+   0 件のときは #list-controls を描画しないため app.js が早期 return し、--header-h は
+   初期値のままになる。0 件のページはスクロールしないので実害は無い。 */
 :root { --header-h: 44px; }
 
 /* 狭い画面では固定しない。3 行分を固定すると投稿を読む領域が残らない。 */
@@ -567,19 +629,46 @@ a.author-name:hover { text-decoration: underline; }
     z-index: 20;
     background: var(--bg); /* 透明だと下のカードが透ける */
   }
+}
 
-  .list-controls {
+/* 【サイドバーを横に並べるのは 1024px 以上。】ヘッダの固定（720px）と閾値が違うのは、
+   400px のサイドバーを 720px の画面で横に置くとカード領域が 284px しか残らず、
+   投稿が読めなくなるため。1024px なら 588px 残る。
+   1024px 未満ではサイドバーは 1 トラックの全幅になり、カードの上に積まれる。 */
+@media (min-width: 1024px) {
+  .results-layout {
+    grid-template-columns: var(--side-w) minmax(0, 1fr);
+    /* 【align-items: start は必須。】既定の stretch ではサイドバーが行の高さ
+       （＝カード列の高さ）まで伸びてしまい、貼り付く余地が無くなって sticky が効かない。 */
+    align-items: start;
+  }
+
+  .results-side {
     position: sticky;
     top: var(--header-h);
     z-index: 10;
     background: var(--bg);
-    /* gap 分の余白まで塗って、下のカードが隙間から見えないようにする。 */
-    padding-bottom: var(--gap);
-    margin-bottom: 0;
     /* 絞り込みを開くと縦に長くなるため、固定部の高さを画面内に収めて内部スクロールにする。
        閉じているときは中身が短いのでスクロールバーは出ない。 */
     max-height: calc(100vh - var(--header-h) - var(--gap));
     overflow-y: auto;
+  }
+
+  /* ページ幅は 3 列時で固定してあるので、列数が少ないときは幅が余る。その余りを
+     カード列に使わせない。使わせると 1 列のカードが 1296px まで伸びて読めなくなる。
+
+     余った幅は margin-inline: auto で左右に均等に配る。右側だけに寄せると、
+     1 列のとき画面の左寄りにカードが偏る。カード列そのものは列数を切り替えると
+     動くが、サイドバーは動かない（ページ幅が列数に依らないため）。
+
+     【justify-self: center ではなく auto マージンを使う。】justify-self を指定すると
+     グリッド項目の幅が fit-content になり、カードの中身次第で列幅が変わってしまう。
+     auto マージンなら幅は min(トラック幅, max-width) で決まり、余りだけが配られる。
+
+     積んでいる 1024px 未満では、サイドバーとカードの右端を揃えたいので上限を掛けない。 */
+  .results-main {
+    max-width: var(--list-max);
+    margin-inline: auto;
   }
 }
 
