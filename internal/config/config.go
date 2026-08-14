@@ -274,7 +274,7 @@ func LoadConfig() (Config, error) {
 	// トークンは UI からも設定できるため、これを致命的な起動失敗として扱うかどうかは
 	// 呼び出し側が決める。ここでは事実だけを ErrNoBearerToken で伝える。
 	if cfg.BearerToken == "" && !cfg.FixtureMode() {
-		return cfg, fmt.Errorf("%w（%s に BEARER_TOKEN=... を書くか、起動後に設定画面から入力してください。課金ゼロで UI を確認したい場合は SEEKX_FIXTURE_DIR=testdata を指定してください）", ErrNoBearerToken, envFile)
+		return cfg, fmt.Errorf("%w（起動後に設定画面から入力してください。起動のたびの入力を避けたい場合に限り %s に BEARER_TOKEN=... を書けますが、その場合トークンはディスク上に残ります。課金ゼロで UI を確認したい場合は SEEKX_FIXTURE_DIR=testdata を指定してください）", ErrNoBearerToken, envFile)
 	}
 	return cfg, nil
 }

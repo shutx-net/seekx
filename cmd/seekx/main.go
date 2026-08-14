@@ -663,7 +663,7 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 			"検索するには X API の Bearer Token が必要です。API はまだ呼び出していません（課金なし）。",
 			[]string{
 				"設定画面（" + settingsPath + "）でトークンを入力してください。プロセス内にのみ保持され、ディスクには保存されません。",
-				"起動のたびに入力したくない場合は .env に BEARER_TOKEN=... を書いてください。",
+				"起動のたびの入力を避けたい場合に限り .env に BEARER_TOKEN=... を書けますが、その場合トークンはディスク上に残ります。",
 				"課金ゼロで UI を確認するだけなら SEEKX_FIXTURE_DIR=testdata を指定して再起動してください。",
 			}, f)
 		return
