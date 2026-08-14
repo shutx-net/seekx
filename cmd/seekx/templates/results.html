@@ -47,7 +47,7 @@
          サイドバー全体ではなくこのブロックだけを hidden にする（D-52）。JS が無いと動かないのは
          コントロールだけで、上のクエリ・メタ情報は JS 無しでも意味があるため。 */}}
     <div class="list-controls" id="list-controls" hidden>
-      <fieldset aria-describedby="cols-note">
+      <fieldset>
         <legend>表示列数</legend>
         {{/* ラジオ input は視覚的に隠すだけで DOM には残す。<button> 群に置き換えると
              role="radiogroup" と矢印キー処理を自前で実装することになり、インライン JS の
@@ -70,7 +70,6 @@
             <span class="sr-only">3 列</span>
           </label>
         </div>
-        <p class="hint" id="cols-note">列数はこのブラウザに保存され、次回以降の検索結果にも適用されます。URL には含めないため、切り替えても再検索は発生しません。画面幅が狭いときは自動的に列数を減らします。</p>
       </fieldset>
 
       {{/* 既定は閉じた状態。open 属性は付けず、開閉状態も保存しない（保存すると <details open> の

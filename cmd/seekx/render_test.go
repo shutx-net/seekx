@@ -770,7 +770,7 @@ func TestColumnIcons(t *testing.T) {
 		t.Error("表示列数の見出しは視覚的に残す")
 	}
 	// 検索フォームと共用のクラスを列数側で使い回さない（変更が波及する）。
-	i := strings.Index(out, `<fieldset aria-describedby="cols-note">`)
+	i := strings.Index(out, `<legend>表示列数</legend>`)
 	end := strings.Index(out[i:], "</fieldset>")
 	if block := out[i : i+end]; strings.Contains(block, `class="radio"`) || strings.Contains(block, `class="checks"`) {
 		t.Error("列数の操作部で .checks / .radio を使わない（フォーム画面に波及する）")
@@ -1373,7 +1373,6 @@ func TestPostListMarkup(t *testing.T) {
 		`<legend>表示列数</legend>`,
 		// 絞り込みは fieldset/legend ではなく details/summary。summary がラベル兼トグル。
 		`<summary aria-describedby="filter-scope-note">このページの絞り込み（再検索なし）`,
-		`aria-describedby="cols-note"`,
 		`aria-describedby="filter-scope-note"`,
 		`aria-describedby="f-likes-note"`,
 		`role="status"`,
@@ -1388,7 +1387,6 @@ func TestPostListMarkup(t *testing.T) {
 		`id="f-no-sensitive"`, `id="f-no-link"`,
 		"絞り込んでもコストは下がりません",
 		"検索結果の全体には及びません",
-		"画面幅が狭いときは自動的に列数を減らします",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("コントロールに %q が含まれていない", want)
