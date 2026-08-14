@@ -99,10 +99,12 @@ jobs:
           done
           ls -lh dist
 
+      # glob を seekx_* に限定するのは、生成中の checksums.txt を巻き込まないためと、
+      # 出力に "./" が付かないようにするため（README の検証コマンドがそのまま使える）。
       - name: checksums
         run: |
           cd dist
-          sha256sum ./* > checksums.txt
+          sha256sum seekx_* > checksums.txt
           cat checksums.txt
 
       # gh は runner に同梱されている。第三者 action を増やさないために CLI を使う。

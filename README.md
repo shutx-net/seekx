@@ -123,20 +123,75 @@ devcontainer は必須ではありません。外部依存が無く、テンプ�
 `//go:embed` でバイナリに入るため、**バイナリ 1 つを置くだけで動きます**（リポジトリの
 ファイルは不要です）。
 
-[Releases](https://github.com/shutx-net/seekx/releases) から自分の環境向けのアーカイブを
-落とすか、手元でビルドしてください。
+#### インストール
+
+[Releases](https://github.com/shutx-net/seekx/releases) から配布バイナリを落とします。
+以下は OS とアーキテクチャを判定して最新版を取得し、カレントディレクトリに `seekx` を置きます。
+
+> リポジトリが private の間、これらの `curl` は 404 になります（認証が要るため）。
+> その間は `gh release download <tag> --repo shutx-net/seekx` を使ってください。
 
 ```sh
-# 配布物を使う場合（linux/amd64 の例）
-tar -xzf seekx_v0.1.0_linux_amd64.tar.gz
-./seekx --version
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m)
+case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
 
-# 手元でビルドする場合
-CGO_ENABLED=0 go build -o seekx ./cmd/seekx
-./seekx
+version=$(curl -fsSL https://api.github.com/repos/shutx-net/seekx/releases/latest |
+  grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)
+
+curl -fsSL "https://github.com/shutx-net/seekx/releases/download/${version}/seekx_${version}_${os}_${arch}.tar.gz" |
+  tar -xz
+
+./seekx --version
 ```
 
-Release には `checksums.txt`（sha256）を添付しています。
+アセット名にバージョンが入るため、`releases/latest/download/` の固定名ショートカットは使えません。
+上のように tag をいったん解決するか、バージョンを直接指定してください。
+
+```sh
+# バージョンを固定する場合
+curl -fsSL https://github.com/shutx-net/seekx/releases/download/v0.1.0/seekx_v0.1.0_darwin_arm64.tar.gz |
+  tar -xz
+```
+
+Windows（PowerShell）:
+
+```powershell
+$version = (Invoke-RestMethod https://api.github.com/repos/shutx-net/seekx/releases/latest).tag_name
+Invoke-WebRequest "https://github.com/shutx-net/seekx/releases/download/$version/seekx_${version}_windows_amd64.zip" -OutFile seekx.zip
+Expand-Archive seekx.zip -DestinationPath . -Force
+.\seekx.exe --version
+```
+
+`checksums.txt`（sha256）も添付しています。展開前に検証する場合は、アーカイブを
+標準出力に流さずファイルとして落としてください。
+
+```sh
+file="seekx_${version}_${os}_${arch}.tar.gz"
+curl -fsSLO "https://github.com/shutx-net/seekx/releases/download/${version}/${file}"
+curl -fsSLO "https://github.com/shutx-net/seekx/releases/download/${version}/checksums.txt"
+
+grep "$file" checksums.txt | sha256sum -c -   # macOS は shasum -a 256 -c -
+tar -xzf "$file"
+```
+
+PATH の通った場所に置くと、どこからでも起動できます。
+
+```sh
+sudo install -m 0755 seekx /usr/local/bin/seekx
+```
+
+手元でビルドする場合:
+
+```sh
+CGO_ENABLED=0 go build -o seekx ./cmd/seekx
+```
+
+#### 起動
+
+```sh
+./seekx
+```
 
 既定でループバック（`127.0.0.1`）にバインドするので、ホスト実行では追加の指定は要りません。
 起動後 `http://localhost:5050/settings` で Bearer Token を入力します。
