@@ -1,0 +1,83 @@
+{{template "top" .}}
+
+<h1>設定</h1>
+
+{{if .Errors}}
+<div class="notice notice-error">
+  <strong>トークンを設定できません</strong>
+  <ul>{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
+
+{{if .Saved}}
+<div class="notice notice-ok">
+  <strong>Bearer Token を設定しました。</strong>このプロセスのメモリにのみ保持しています（停止すると消えます）。
+</div>
+{{end}}
+
+{{if .Cleared}}
+<div class="notice notice-ok">
+  <strong>設定画面から入力したトークンを削除しました。</strong>
+  {{if .HasEnvToken}}.env / 環境変数のトークンに戻りました。{{else}}トークンは未設定の状態です。{{end}}
+</div>
+{{end}}
+
+{{if .SessionReset}}
+<div class="notice notice-warn">
+  トークンが変わったため、セッション累計コストと月次 cap の表示をリセットしました
+  （別アカウントの消費を同じ累計に混ぜると予算ガードの判定が狂うためです）。
+</div>
+{{end}}
+
+<h2>Bearer Token</h2>
+
+<ul class="meta-list">
+  <li>現在の値: <span class="strong">{{.TokenMasked}}</span>（先頭 4 文字と文字数のみ）</li>
+  <li>出所: <span class="strong">{{.TokenSource}}</span></li>
+</ul>
+
+{{if .FixtureMode}}
+<p class="hint">いまはフィクスチャモードです。X API は呼び出されないため、トークンは使われません（課金 0）。</p>
+{{end}}
+
+<form action="{{.TokenPath}}" method="post" autocomplete="off">
+  <fieldset>
+    <legend>トークンを設定する</legend>
+    <div class="field">
+      <label for="bearer">新しい Bearer Token</label>
+      <input type="password" id="bearer" name="bearer"
+        autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+        placeholder="X 開発者ポータルの App から取得した値を貼り付けてください">
+      <p class="hint">入力した値は画面に表示されません。設定後もマスク表示だけを出します。</p>
+    </div>
+    <div class="actions">
+      <button type="submit">このトークンを使う</button>
+    </div>
+  </fieldset>
+</form>
+
+{{if .HasUIToken}}
+<form action="{{.ClearPath}}" method="post">
+  <div class="actions">
+    <button type="submit" class="secondary">入力したトークンを削除する{{if .HasEnvToken}}（.env の値に戻す）{{end}}</button>
+  </div>
+</form>
+{{end}}
+
+<h2>この設定について</h2>
+
+<ul class="meta-list">
+  <li><span class="strong">ディスクには保存しません。</span>プロセスのメモリにのみ保持します。起動のたびに入力したくない場合は、
+    ワークスペース直下の <code>.env</code> に <code>BEARER_TOKEN=...</code> を書いてください。</li>
+  <li><span class="strong">優先順位は「この画面 &gt; .env / 環境変数」です。</span>この画面で設定するとそちらが使われ、
+    削除すると .env の値に戻ります。</li>
+  <li><span class="strong">値は画面・ログ・エラー・URL のどこにも出力しません。</span>出るのはマスク表示だけです。</li>
+  <li><span class="strong">トークンはプロセス全体で 1 つです。</span>複数人が同時に開いている場合、後から設定した人のトークンで
+    全員の検索が実行され、その人のアカウントに課金されます。seekx はローカル単一ユーザー用途を前提としています。</li>
+  <li><span class="strong">正しさはここでは確認しません。</span>検証には API 呼び出しが必要でレートリミットを消費するためです。
+    誤っている場合は検索実行時に「認証に失敗しました（HTTP 401）」になります（401 は課金なし）。</li>
+</ul>
+
+<p><a href="/">検索画面へ戻る</a></p>
+
+{{template "bottom" .}}

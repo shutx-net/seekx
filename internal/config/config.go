@@ -8,6 +8,7 @@ package config
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -30,6 +31,12 @@ const (
 	defaultDisplayTZ        = "Asia/Tokyo"
 	defaultEnvFile          = ".env"
 )
+
+// ErrNoBearerToken は BEARER_TOKEN が解決できなかったことを表す。
+//
+// フィクスチャモード以外では検索に必須だが、起動後に UI から設定できるため、
+// 起動を止めるかどうかは呼び出し側（cmd/seekx）が errors.Is で判断する。
+var ErrNoBearerToken = errors.New("BEARER_TOKEN が設定されていません")
 
 // DefaultAllowedHosts は Host ヘッダのホスト名として既定で許可する値を返す。
 //
@@ -264,8 +271,10 @@ func LoadConfig() (Config, error) {
 	}
 
 	// フィクスチャモードでは API を叩かないためトークンは不要（D-22）。
+	// トークンは UI からも設定できるため、これを致命的な起動失敗として扱うかどうかは
+	// 呼び出し側が決める。ここでは事実だけを ErrNoBearerToken で伝える。
 	if cfg.BearerToken == "" && !cfg.FixtureMode() {
-		return cfg, fmt.Errorf("BEARER_TOKEN が見つかりません。ワークスペース直下の %s に BEARER_TOKEN=... を設定してください（課金ゼロで UI を確認したい場合は SEEKX_FIXTURE_DIR=testdata を指定してください）", envFile)
+		return cfg, fmt.Errorf("%w（%s に BEARER_TOKEN=... を書くか、起動後に設定画面から入力してください。課金ゼロで UI を確認したい場合は SEEKX_FIXTURE_DIR=testdata を指定してください）", ErrNoBearerToken, envFile)
 	}
 	return cfg, nil
 }

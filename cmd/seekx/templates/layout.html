@@ -17,8 +17,12 @@
     {{if .FixtureMode}}<span class="badge badge-fixture">フィクスチャモード（課金 0）</span>{{end}}
     <span class="badge" title="このプロセスを起動してからの推定コスト">セッション {{usd .SessionUSD}} / {{.SessionCalls}} 回</span>
     {{if .Cap.Known}}<span class="badge" title="月次 post read cap の消費状況（毎月 {{.Cap.ResetDay}} 日リセット）">月次 cap {{num .Cap.Usage}} / {{num .Cap.Cap}}（{{pct .Cap.Percent}}）</span>{{end}}
+    <a class="badge" href="{{.SettingsURL}}">設定</a>
   </div>
 </header>
+{{if and (not .FixtureMode) (not .TokenConfigured)}}
+<div class="banner banner-block">Bearer Token が設定されていません。<a href="{{.SettingsURL}}">設定</a>から入力するか、.env に <code>BEARER_TOKEN=...</code> を書いてください。検索は実行できません（課金は発生しません）。</div>
+{{end}}
 {{if .Cap.IsWarn}}
 <div class="banner banner-warn">月次上限の {{pct .Cap.Percent}} を消費しています（{{num .Cap.Usage}} / {{num .Cap.Cap}} post reads）。リセットは毎月 {{.Cap.ResetDay}} 日です。</div>
 {{end}}

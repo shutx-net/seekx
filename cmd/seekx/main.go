@@ -14,6 +14,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -74,13 +75,17 @@ type App struct {
 	tmpl    *template.Template
 	log     *slog.Logger
 	session *cost.SessionSpend
+	tokens  *tokenStore
 	loc     *time.Location
 	now     func() time.Time
 }
 
 func main() {
 	cfg, err := config.LoadConfig()
-	if err != nil {
+	// トークン未設定は起動を止めない。設定画面から入力できるため（D-09 の例外）。
+	// それ以外の設定エラー（数値の書式など）は従来どおり致命的に扱う。
+	noToken := errors.Is(err, config.ErrNoBearerToken)
+	if err != nil && !noToken {
 		fmt.Fprintln(os.Stderr, "起動できません: "+err.Error())
 		os.Exit(1)
 	}
@@ -99,6 +104,10 @@ func main() {
 	if cfg.FixtureMode() {
 		log.Info("フィクスチャモードです。X API は呼び出されません（課金 0）", "dir", cfg.FixtureDir)
 	}
+	if noToken {
+		log.Warn("BEARER_TOKEN が未設定のまま起動します。検索は設定画面でトークンを入力してから実行できます",
+			"settings_url", "http://localhost:"+cfg.Port+settingsPath)
+	}
 
 	app := &App{
 		cfg:     cfg,
@@ -106,6 +115,7 @@ func main() {
 		tmpl:    tmpl,
 		log:     log,
 		session: &cost.SessionSpend{},
+		tokens:  newTokenStore(cfg.BearerToken),
 		loc:     cfg.Location(),
 		now:     time.Now,
 	}
@@ -138,11 +148,22 @@ func clientOptions(cfg config.Config) xapi.Options {
 	}
 }
 
+// 設定画面のパス。テンプレート・ログ・リダイレクト先で共有する単一情報源。
+const (
+	settingsPath      = "/settings"
+	settingsTokenPath = "/settings/token"
+	settingsClearPath = "/settings/token/clear"
+)
+
 func newRouter(app *App) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", app.handleIndex)
 	mux.HandleFunc("GET /search", app.handleSearch)
 	mux.HandleFunc("GET /healthz", app.handleHealthz)
+	// トークンの設定は POST のみ。GET にすると値が URL・履歴・ログに残る（D-23 の例外）。
+	mux.HandleFunc("GET "+settingsPath, app.handleSettings)
+	mux.HandleFunc("POST "+settingsTokenPath, app.handleSetToken)
+	mux.HandleFunc("POST "+settingsClearPath, app.handleClearToken)
 	mux.Handle("GET /static/", app.staticHandler())
 	// セキュリティヘッダを外側に置く。guard が拒否した 403 応答にもヘッダを付けるため。
 	return withSecurityHeaders(withRequestGuard(mux, app.cfg.AllowedHosts, app.log))
@@ -217,6 +238,25 @@ type Page struct {
 	FixtureMode  bool
 	TZ           string
 	CountsCost   float64
+
+	// TokenConfigured は Bearer Token が設定済みかどうか。値そのものは渡さない。
+	TokenConfigured bool
+	SettingsURL     string
+}
+
+// SettingsPage は設定画面。トークンの値は渡さない（マスク表示のみ）。
+type SettingsPage struct {
+	Page
+	TokenMasked  string
+	TokenSource  string
+	HasEnvToken  bool
+	HasUIToken   bool
+	Saved        bool
+	Cleared      bool
+	Errors       []string
+	TokenPath    string
+	ClearPath    string
+	SessionReset bool
 }
 
 type MaxOption struct {
@@ -302,14 +342,22 @@ type ErrorPage struct {
 
 func (a *App) page(title string, cap cost.CapStatus, ep xapi.Endpoint) Page {
 	return Page{
-		Title:        title,
-		SessionUSD:   a.session.Total(),
-		SessionCalls: a.session.CallCount(),
-		Cap:          cap,
-		FixtureMode:  a.cfg.FixtureMode(),
-		TZ:           a.cfg.DisplayTZ,
-		CountsCost:   cost.CountsCostFor(ep),
+		Title:           title,
+		SessionUSD:      a.session.Total(),
+		SessionCalls:    a.session.CallCount(),
+		Cap:             cap,
+		FixtureMode:     a.cfg.FixtureMode(),
+		TZ:              a.cfg.DisplayTZ,
+		CountsCost:      cost.CountsCostFor(ep),
+		TokenConfigured: a.client.HasToken(),
+		SettingsURL:     settingsPath,
 	}
+}
+
+// tokenReady は検索を実行できる状態かを返す。
+// フィクスチャモードでは API を叩かないためトークンは不要（D-22）。
+func (a *App) tokenReady() bool {
+	return a.cfg.FixtureMode() || a.client.HasToken()
 }
 
 var langOptions = []LangOption{
@@ -497,6 +545,92 @@ func (a *App) renderForm(w http.ResponseWriter, r *http.Request, f query.SearchF
 	a.render(w, status, "form.html", p)
 }
 
+// ---------------------------------------------------------------------------
+// 設定画面（Bearer Token）
+//
+// 方針:
+//   - 値は絶対に画面へ描き戻さない。マスク表示だけ（P-TOKEN-LEAK）。
+//     ページを読めた相手にトークンを渡さないことが、認証を持たないこのサーバでの前提。
+//   - 受け取りは POST のみ。GET だと URL・ブラウザ履歴・ログに値が残る。
+//   - CSRF は guard.go の cross-site 検証で塞ぐ。他サイトからの POST には
+//     ブラウザが必ず Origin を付けるため、トークン方式（＝Cookie でのセッション導入）を
+//     持ち込まずに済む。
+// ---------------------------------------------------------------------------
+
+// maxSettingsBody は設定フォームの本文サイズの上限。トークンは 1KB 以内に収まる。
+const maxSettingsBody = 64 << 10
+
+func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	a.renderSettings(w, r, nil, http.StatusOK, q.Get("saved") == "1", q.Get("cleared") == "1")
+}
+
+func (a *App) renderSettings(w http.ResponseWriter, r *http.Request, errs []string, status int, saved, cleared bool) {
+	tok, src := a.tokens.Effective()
+	p := SettingsPage{
+		Page:         a.page("設定", a.capStatus(r.Context()), xapi.EndpointRecent),
+		TokenMasked:  config.MaskToken(tok),
+		TokenSource:  src.String(),
+		HasEnvToken:  a.tokens.HasEnv(),
+		HasUIToken:   a.tokens.HasUI(),
+		Saved:        saved,
+		Cleared:      cleared,
+		Errors:       errs,
+		TokenPath:    settingsTokenPath,
+		ClearPath:    settingsClearPath,
+		SessionReset: saved || cleared,
+	}
+	// マスク済みとはいえ設定状態が残るページなので、キャッシュさせない。
+	w.Header().Set("Cache-Control", "no-store")
+	a.render(w, status, "settings.html", p)
+}
+
+func (a *App) handleSetToken(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSettingsBody)
+	if err := r.ParseForm(); err != nil {
+		// err には本文が含まれ得るのでそのままは出さない。
+		a.log.Warn("設定フォームの解析に失敗しました")
+		a.renderSettings(w, r, []string{"フォームを読み取れませんでした。入力内容を確認してください。"},
+			http.StatusBadRequest, false, false)
+		return
+	}
+
+	changed, err := a.tokens.Set(r.PostFormValue("bearer"))
+	if err != nil {
+		// err は validateToken が組み立てたもので、入力値は含まない。
+		a.renderSettings(w, r, []string{err.Error()}, http.StatusBadRequest, false, false)
+		return
+	}
+	a.applyToken(changed)
+	// PRG。リロードで再送信されないようにし、POST 本文を履歴に残さない。
+	http.Redirect(w, r, settingsPath+"?saved=1", http.StatusSeeOther)
+}
+
+func (a *App) handleClearToken(w http.ResponseWriter, r *http.Request) {
+	a.applyToken(a.tokens.Clear())
+	http.Redirect(w, r, settingsPath+"?cleared=1", http.StatusSeeOther)
+}
+
+// applyToken は tokenStore の現在値を Client に反映する。
+//
+// トークンが実際に変わったときはセッション累計も 0 に戻す。別アカウントの支出を
+// 1 つの累計に混ぜると予算ガードの判定が狂うため（usage キャッシュの破棄は
+// Client.SetToken の側で行われる）。同じ値を入れ直しただけなら累計は維持する。
+//
+// トークンの差し替えはこの 1 箇所に集約する。反映と破棄がばらけると必ず片方を忘れる。
+func (a *App) applyToken(changed bool) {
+	tok, src := a.tokens.Effective()
+	a.client.SetToken(tok)
+	if changed {
+		a.session.Reset()
+	}
+	a.log.Info("Bearer Token を更新しました",
+		"source", src.String(),
+		"bearer_token", config.MaskToken(tok),
+		"changed", changed,
+		"session_reset", changed)
+}
+
 func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := parseSearchForm(q)
@@ -518,6 +652,20 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 			msgs = []string{err.Error()}
 		}
 		a.renderForm(w, r, f, msgs, nil, http.StatusBadRequest)
+		return
+	}
+
+	// API を呼ぶ手前でトークンの有無を確かめる。無いまま呼んでも 401 が返るだけだが、
+	// 原因と次の一手が分からない画面になる（課金は発生しない）。
+	if (mode == "estimate" || mode == "execute") && !a.tokenReady() {
+		a.log.Info("トークン未設定のため実行しませんでした（API は呼び出していません）", "mode", mode)
+		a.renderError(w, r, http.StatusForbidden, "Bearer Token が設定されていません",
+			"検索するには X API の Bearer Token が必要です。API はまだ呼び出していません（課金なし）。",
+			[]string{
+				"設定画面（" + settingsPath + "）でトークンを入力してください。プロセス内にのみ保持され、ディスクには保存されません。",
+				"起動のたびに入力したくない場合は .env に BEARER_TOKEN=... を書いてください。",
+				"課金ゼロで UI を確認するだけなら SEEKX_FIXTURE_DIR=testdata を指定して再起動してください。",
+			}, f)
 		return
 	}
 
@@ -661,6 +809,10 @@ func (a *App) executeSearch(ctx context.Context, p xapi.SearchParams) (*xapi.Sea
 
 // capStatus は usage を（キャッシュ経由で）取得して CapStatus を返す。失敗しても検索は続行できる。
 func (a *App) capStatus(ctx context.Context) cost.CapStatus {
+	// トークンが無ければ usage も 401 になる。毎ページ叩きに行かない。
+	if !a.tokenReady() {
+		return cost.CapStatus{Cap: cost.MonthlyPostCapDefault}
+	}
 	u, err := a.client.Usage(ctx)
 	if err != nil {
 		a.log.Warn("usage の取得に失敗しました（cap 表示を省略します）", "err", err.Error())

@@ -92,6 +92,7 @@ func testApp(t *testing.T, cfg config.Config) *App {
 		tmpl:    tmpl,
 		log:     log,
 		session: &cost.SessionSpend{},
+		tokens:  newTokenStore(cfg.BearerToken),
 		loc:     cfg.Location(),
 		now:     func() time.Time { return time.Date(2026, 8, 13, 9, 0, 0, 0, cfg.Location()) },
 	}
@@ -322,6 +323,50 @@ func TestRenderTemplates(t *testing.T) {
 			if !strings.Contains(out, "フォームに戻る") {
 				t.Errorf("%v: 戻るリンクがない", k)
 			}
+		}
+	})
+
+	t.Run("settings.html", func(t *testing.T) {
+		p := SettingsPage{
+			Page:         app.page("設定", cap, xapi.EndpointRecent),
+			TokenMasked:  config.MaskToken("AAAAsecret1234"),
+			TokenSource:  tokenSourceUI.String(),
+			HasEnvToken:  true,
+			HasUIToken:   true,
+			Saved:        true,
+			SessionReset: true,
+			TokenPath:    settingsTokenPath,
+			ClearPath:    settingsClearPath,
+		}
+		out := mustRender(t, app, "settings.html", p)
+		for _, want := range []string{
+			`name="bearer"`, `type="password"`, `method="post"`,
+			settingsTokenPath, settingsClearPath, `for="bearer"`,
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("settings.html に %q が含まれていない", want)
+			}
+		}
+		if strings.Contains(out, "AAAAsecret1234") {
+			t.Error("settings.html にトークンの値が出ている")
+		}
+	})
+
+	t.Run("settings.html（エラー表示）", func(t *testing.T) {
+		p := SettingsPage{
+			Page:        app.page("設定", cap, xapi.EndpointRecent),
+			TokenMasked: config.MaskToken(""),
+			TokenSource: tokenSourceNone.String(),
+			Errors:      []string{"トークンが空です。"},
+			TokenPath:   settingsTokenPath,
+			ClearPath:   settingsClearPath,
+		}
+		out := mustRender(t, app, "settings.html", p)
+		if !strings.Contains(out, "トークンが空です。") {
+			t.Error("エラーが表示されていない")
+		}
+		if strings.Contains(out, settingsClearPath) {
+			t.Error("UI 設定が無いときに削除ボタンを出してはいけない")
 		}
 	})
 }

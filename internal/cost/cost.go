@@ -147,6 +147,16 @@ func (s *SessionSpend) Add(usd float64) {
 	s.Calls++
 }
 
+// Reset は累計を 0 に戻す。Bearer Token を差し替えたときに使う。
+// 別アカウントの支出を 1 つのセッション累計に混ぜると、GateAllows の判定が
+// 両方向に狂う（過大にも過小にもなる）。
+func (s *SessionSpend) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.USD = 0
+	s.Calls = 0
+}
+
 func (s *SessionSpend) Total() float64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
