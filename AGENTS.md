@@ -58,7 +58,25 @@ devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.js
 - `-race` は外せません。Bearer Token の差し替えなど実行時に可変な状態があり、
   競合はこれでしか検出できません。
 
-検証コマンドを増減するときは、この節と `ci.yml` の両方を更新してください。
+検証コマンドを増減するときは、この節と `ci.yml`・`release.yml` の 3 つを更新してください。
+
+## リリース
+
+`.github/workflows/release.yml` が `v*` のタグ push で走り、バイナリをビルドして
+GitHub Release に添付します。
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+- 対象は linux / darwin / windows × amd64 / arm64 の 6 つ。外部依存が無いので
+  `CGO_ENABLED=0` で 1 ジョブから全部クロスコンパイルします。
+- 実行ビットを保つため tar.gz（Windows は zip）に固めます。`checksums.txt` も添付します。
+- タグ名は `-ldflags -X main.version=` で埋め込まれ、`seekx --version` と起動ログに出ます。
+- `ci.yml` はタグ push では走りません。壊れたバイナリを配らないよう、`release.yml` 側でも
+  同じ検証（build / vet / gofmt / test -race）を通してからビルドします。
+- 第三者 action は使わず、Release の作成は runner 同梱の `gh` CLI で行います。
 
 ## パッケージ構成
 

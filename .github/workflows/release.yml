@@ -1,0 +1,104 @@
+# バージョンタグ（v1.2.3 など）を打つと、各プラットフォーム向けのバイナリを
+# ビルドして GitHub Release に添付する。
+#
+# ci.yml は push（main）と pull request でしか動かず、タグ push では走らない。
+# 壊れたバイナリを配らないよう、この workflow 側でも同じ検証を通してからビルドする。
+# 検証コマンドを増減するときは ci.yml と AGENTS.md も併せて更新すること。
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Release の作成にはリポジトリへの書き込みが要る。
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup Go
+        uses: actions/setup-go@v5
+        with:
+          # 配布物は最新の Go でビルドする。go.mod が宣言する下限（1.22）での
+          # ビルド可否は ci.yml が pull request の時点で確認済み。
+          go-version: stable
+          cache: false
+
+      # 壊れたバイナリを配らないための門番。ci.yml と同じ検証を通す。
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt がかかっていないファイルがあります:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go test
+        run: go test -race ./...
+
+      # 外部依存が無い純粋な Go なので、CGO_ENABLED=0 なら 1 ジョブで全部クロスコンパイルできる。
+      # -trimpath はビルド環境の絶対パスを埋め込ませないため、-s -w はサイズを削るため。
+      # version は起動ログと --version に出る（cmd/seekx/main.go）。
+      - name: build
+        env:
+          CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          for target in \
+            linux/amd64 linux/arm64 \
+            darwin/amd64 darwin/arm64 \
+            windows/amd64 windows/arm64
+          do
+            os=${target%/*}
+            arch=${target#*/}
+            bin=seekx
+            if [ "$os" = windows ]; then
+              bin=seekx.exe
+            fi
+            GOOS=$os GOARCH=$arch go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist/${bin}" ./cmd/seekx
+
+            name="seekx_${VERSION}_${os}_${arch}"
+            # 実行ビットを保つためアーカイブにする（Release から直接落とすと失われる）。
+            if [ "$os" = windows ]; then
+              (cd dist && zip -q "${name}.zip" "${bin}" && rm "${bin}")
+            else
+              (cd dist && tar -czf "${name}.tar.gz" "${bin}" && rm "${bin}")
+            fi
+          done
+          ls -lh dist
+
+      - name: checksums
+        run: |
+          cd dist
+          sha256sum ./* > checksums.txt
+          cat checksums.txt
+
+      # gh は runner に同梱されている。第三者 action を増やさないために CLI を使う。
+      # タグ名は ${{ }} で直接展開せず env 経由で渡す（run へのスクリプト注入を避ける）。
+      - name: create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --generate-notes \
+            dist/*

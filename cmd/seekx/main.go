@@ -73,6 +73,10 @@ func humanInt(n int) string {
 
 var tmpl = template.Must(template.New("").Funcs(templateFuncs).ParseFS(templatesFS, "templates/*.html"))
 
+// version はリリース時に -ldflags で埋め込む（.github/workflows/release.yml）。
+// 手元のビルドでは "dev" のまま。配布したバイナリがどれか分かるようにするための値。
+var version = "dev"
+
 // App は HTTP ハンドラが共有する依存。
 type App struct {
 	cfg     config.Config
@@ -86,6 +90,13 @@ type App struct {
 }
 
 func main() {
+	// 配布したバイナリの版を確かめる手段。設定の読み込みより前に返す。
+	// flag パッケージを使わないのは、既存の起動経路に引数解析を持ち込まないため。
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println("seekx " + version)
+		return
+	}
+
 	cfg, err := config.LoadConfig()
 	// トークン未設定は起動を止めない。設定画面から入力できるため（D-09 の例外）。
 	// それ以外の設定エラー（数値の書式など）は従来どおり致命的に扱う。
@@ -97,6 +108,7 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: config.SlogLevel(cfg.LogLevel)}))
 	log.Info("seekx を起動します",
+		"version", version,
 		"bearer_token", config.MaskToken(cfg.BearerToken),
 		"fixture_mode", cfg.FixtureMode(),
 		"fixture_dir", cfg.FixtureDir,

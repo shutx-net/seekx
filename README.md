@@ -123,10 +123,20 @@ devcontainer は必須ではありません。外部依存が無く、テンプ�
 `//go:embed` でバイナリに入るため、**バイナリ 1 つを置くだけで動きます**（リポジトリの
 ファイルは不要です）。
 
+[Releases](https://github.com/shutx-net/seekx/releases) から自分の環境向けのアーカイブを
+落とすか、手元でビルドしてください。
+
 ```sh
+# 配布物を使う場合（linux/amd64 の例）
+tar -xzf seekx_v0.1.0_linux_amd64.tar.gz
+./seekx --version
+
+# 手元でビルドする場合
 CGO_ENABLED=0 go build -o seekx ./cmd/seekx
 ./seekx
 ```
+
+Release には `checksums.txt`（sha256）を添付しています。
 
 既定でループバック（`127.0.0.1`）にバインドするので、ホスト実行では追加の指定は要りません。
 起動後 `http://localhost:5050/settings` で Bearer Token を入力します。
