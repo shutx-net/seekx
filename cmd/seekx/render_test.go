@@ -30,6 +30,16 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// newTestRequest は「ブラウザがこのアプリのページから出した同一オリジンのリクエスト」を模す。
+// newRouter は Host と cross-site を検証する（guard.go）ため、httptest.NewRequest の
+// 既定（Host: example.com・Sec-Fetch-Site 無し）のままでは 403 になる。
+func newTestRequest(method, target string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	req.Host = "localhost:" + config.DefaultPort
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	return req
+}
+
 func loadFixture(t *testing.T, name string, out any) {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(fixtureDir, name))
@@ -412,7 +422,7 @@ func TestHandlersFixtureMode(t *testing.T) {
 
 	get := func(t *testing.T, target string) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req := newTestRequest(http.MethodGet, target, nil)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		return rec
@@ -519,7 +529,7 @@ func TestHandlersFixtureMode(t *testing.T) {
 			"/search?kw=%E7%8C%AB&mode=estimate",
 			"/search?kw=%E7%8C%AB&mode=execute",
 		} {
-			req := httptest.NewRequest(http.MethodGet, target, nil)
+			req := newTestRequest(http.MethodGet, target, nil)
 			r2.ServeHTTP(httptest.NewRecorder(), req)
 		}
 		if got := app2.session.Total(); got != 0 {
@@ -583,7 +593,7 @@ func TestErrorPages(t *testing.T) {
 			app := testApp(t, config.Config{BearerToken: secret, APIBaseURL: srv.URL})
 			router := newRouter(app)
 
-			req := httptest.NewRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=execute", nil)
+			req := newTestRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=execute", nil)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 
@@ -640,6 +650,7 @@ func TestFormRoundTrip(t *testing.T) {
 }
 
 func parseQueryOf(target string) (url.Values, error) {
+	// URL を分解するだけでルータには渡さないので、guard 向けのヘッダは要らない。
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	return req.URL.Query(), nil
 }
@@ -660,7 +671,7 @@ func TestExecuteSearchIsOnlyBillingPath(t *testing.T) {
 	router := newRouter(app)
 
 	// セッション予算 $0.001 では max_results=10（最大 $0.15）が通らない。
-	req := httptest.NewRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=execute", nil)
+	req := newTestRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=execute", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -729,7 +740,7 @@ func TestSecurityHeaders(t *testing.T) {
 	for _, path := range []string{"/", "/healthz", "/static/style.css", "/static/js/app.js"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			router.ServeHTTP(rec, newTestRequest(http.MethodGet, path, nil))
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d", rec.Code)
 			}
@@ -770,7 +781,7 @@ func TestJavaScriptContentType(t *testing.T) {
 
 	for _, path := range []string{"/static/js/boot.js", "/static/js/app.js"} {
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		router.ServeHTTP(rec, newTestRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
 			t.Errorf("%s: status = %d", path, rec.Code)
 			continue
@@ -1007,7 +1018,7 @@ func TestEstimateChargesCountsOnlyOnSuccess(t *testing.T) {
 		return app, newRouter(app)
 	}
 	estimate := func(h http.Handler) {
-		req := httptest.NewRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=estimate", nil)
+		req := newTestRequest(http.MethodGet, "/search?kw=%E7%8C%AB&max=10&mode=estimate", nil)
 		h.ServeHTTP(httptest.NewRecorder(), req)
 	}
 

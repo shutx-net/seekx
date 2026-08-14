@@ -40,7 +40,7 @@ devcontainer exec --workspace-folder . --config .devcontainer/go/devcontainer.js
 `go build ./...` が循環の不在を保証します。
 
 ```
-cmd/seekx  ──> config, query, cost, view, xapi   （main.go・templates/・static/）
+cmd/seekx  ──> config, query, cost, view, xapi   （main.go・guard.go・templates/・static/）
 cost       ──> config, xapi
 query      ──> xapi
 view       ──> xapi                （query と cost を import しない）

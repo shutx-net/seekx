@@ -94,6 +94,7 @@ func main() {
 		"tz", cfg.DisplayTZ,
 		"session_budget_usd", cfg.SessionBudgetUSD,
 		"max_results_cap", cfg.MaxResultsCap,
+		"allowed_hosts", strings.Join(cfg.AllowedHosts, ","),
 	)
 	if cfg.FixtureMode() {
 		log.Info("フィクスチャモードです。X API は呼び出されません（課金 0）", "dir", cfg.FixtureDir)
@@ -143,7 +144,8 @@ func newRouter(app *App) http.Handler {
 	mux.HandleFunc("GET /search", app.handleSearch)
 	mux.HandleFunc("GET /healthz", app.handleHealthz)
 	mux.Handle("GET /static/", app.staticHandler())
-	return withSecurityHeaders(mux)
+	// セキュリティヘッダを外側に置く。guard が拒否した 403 応答にもヘッダを付けるため。
+	return withSecurityHeaders(withRequestGuard(mux, app.cfg.AllowedHosts, app.log))
 }
 
 // contentSecurityPolicy は script について厳格な CSP。

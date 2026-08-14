@@ -285,3 +285,88 @@ func TestLoadConfigMissingToken(t *testing.T) {
 		t.Error("FixtureMode が true になるべき")
 	}
 }
+
+func TestNormalizeHostname(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"localhost:5050", "localhost"},
+		{"localhost", "localhost"},
+		{"LocalHost:5050", "localhost"},
+		{"localhost.:5050", "localhost"},
+		{"  localhost  ", "localhost"},
+		{"127.0.0.1:5050", "127.0.0.1"},
+		{"[::1]:5050", "::1"},
+		{"[::1]", "::1"},
+		{"::1", "::1"},
+		{"evil.example", "evil.example"},
+		{"", ""},
+		{"localhost:5050:9999", "localhost:5050:9999"}, // 壊れた Host は正規化せず不一致にする
+	}
+	for _, tc := range cases {
+		if got := NormalizeHostname(tc.in); got != tc.want {
+			t.Errorf("NormalizeHostname(%q): got %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestParseAllowedHosts(t *testing.T) {
+	// 既定値は常に残る（localhost を失う設定ミスを防ぐ）。
+	got := parseAllowedHosts("")
+	want := DefaultAllowedHosts()
+	if len(got) != len(want) {
+		t.Fatalf("既定の許可ホスト: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("既定の許可ホスト[%d]: got %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// 追加分は正規化して既定値の後ろに足す。重複と空要素は落とす。
+	got = parseAllowedHosts(" seekx.local:5050 , 192.168.1.5 ,, localhost , SEEKX.LOCAL ")
+	wantExtra := []string{"seekx.local", "192.168.1.5"}
+	if len(got) != len(want)+len(wantExtra) {
+		t.Fatalf("追加後の許可ホスト: got %v", got)
+	}
+	for i, w := range wantExtra {
+		if got[len(want)+i] != w {
+			t.Errorf("追加分[%d]: got %q, want %q", i, got[len(want)+i], w)
+		}
+	}
+}
+
+func TestDefaultAllowedHostsIsNotShared(t *testing.T) {
+	// 呼び出し側が書き換えても次の呼び出しに影響しないこと。
+	a := DefaultAllowedHosts()
+	a[0] = "evil.example"
+	if DefaultAllowedHosts()[0] != "localhost" {
+		t.Error("DefaultAllowedHosts が呼び出し側から書き換えられている")
+	}
+}
+
+func TestLoadConfigAllowedHosts(t *testing.T) {
+	p := writeTempEnv(t, "SEEKX_ALLOWED_HOSTS=seekx.local\n")
+	t.Setenv("SEEKX_ENV_FILE", p)
+	t.Setenv("SEEKX_FIXTURE_DIR", "testdata")
+	t.Setenv("BEARER_TOKEN", "")
+	t.Setenv("SEEKX_ALLOWED_HOSTS", "")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	found := false
+	for _, h := range cfg.AllowedHosts {
+		if h == "seekx.local" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf(".env の SEEKX_ALLOWED_HOSTS が反映されていない: %v", cfg.AllowedHosts)
+	}
+	if len(cfg.AllowedHosts) == 0 || cfg.AllowedHosts[0] != "localhost" {
+		t.Errorf("既定の localhost が失われている: %v", cfg.AllowedHosts)
+	}
+}
