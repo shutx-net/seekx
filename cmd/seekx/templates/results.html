@@ -12,22 +12,11 @@
      カードを操作するコントロールで、「本文と切り離しても意味を持つ補足」ではないため。
      読み上げ順・フォーカス順は従来どおり「コントロール → カード」で変わらない。 */}}
 <div class="results-layout">
+  {{/* サイドバーの並びは「注意 → 操作 → 参照」（#19）。貼り付くサイドバーでは、繰り返し
+       触るものを上に置く。参照情報を先頭に置くと操作部に届くまで約 260px スクロールが要り、
+       max-height で内部スクロールが出たときに隠れるのも操作部の側になる。
+       警告は条件付きなので普段は場所を取らず、出たときは注意を要するので最上段に置く。 */}}
   <div class="results-side">
-    <div class="query-box">
-      <strong>生成されたクエリ</strong>
-      <code>{{.Result.QueryString}}</code>
-      <p class="hint">{{.Result.QueryRunes}} 文字 / 上限 {{.Result.QueryLimit}} 文字（参考: {{.Result.QueryBytes}} バイト）</p>
-    </div>
-
-    <ul class="meta-list">
-      <li>表示中 <span class="strong">{{num .Result.ResultCount}} 件</span>（検索範囲: {{.Result.EndpointName}} / 取得件数 {{.Result.MaxResults}}）</li>
-      {{if .Result.StartDisplay}}<li>期間: {{.Result.StartDisplay}} 〜 {{.Result.EndDisplay}}（{{.TZ}}）</li>{{end}}
-      <li>今回の推定コスト: <span class="strong">{{usd .Result.SpentUSD}}</span> / セッション累計 {{usd .SessionUSD}}</li>
-      {{if .Result.RateLimit}}<li>レートリミット残り: {{.Result.RateLimit.Remaining}} / {{.Result.RateLimit.Limit}}{{if .RateLimitReset}}（{{.RateLimitReset}} にリセット・{{.TZ}}）{{end}}</li>{{end}}
-    </ul>
-
-    <p class="hint">このページの再読み込みは再検索になります（同一投稿の再取得は 24 時間以内なら追加の金銭コストが発生しにくいですが、cap とレートリミットは消費します）。</p>
-
     {{if .Result.Warnings}}
     <div class="notice notice-warn">
       <ul>{{range .Result.Warnings}}<li>{{.}}</li>{{end}}</ul>
@@ -108,10 +97,16 @@
           <label class="check"><input type="checkbox" id="f-no-sensitive"> センシティブな投稿を除く</label>
           <label class="check"><input type="checkbox" id="f-no-link"> リンクを含む投稿を除く</label>
         </div>
-        <p class="hint" id="f-likes-note">メトリクスを取得できなかった投稿は、いいねの最小数を指定すると除外されます（0 件と区別できないため）。</p>
-        <p class="hint" id="filter-runes-note">文字数は本文の文字数（Unicode コードポイント数）です。サーバ側で数えているため、バイト数ではありません。絵文字の一部は 2 文字以上として数えられます。長文投稿は全文の文字数です。</p>
-        <p class="hint" id="filter-scope-note">絞り込みは、いま表示しているこのページの取得済み投稿だけに適用されます。検索結果の全体には及びません。ページを移動すると絞り込みは解除され、移動先のページの取得には新たにコストが発生します。ページをまたいで絞り込みたい場合は、検索条件（返信を除く・メディア付きなど）を指定して検索し直してください。</p>
-        <p class="hint" id="filter-cost-note">絞り込んでもコストは下がりません。このページの投稿の post read は取得した時点で課金済みです（画面上部の推定コストは取得件数に対する実績で、絞り込みでは変わりません）。</p>
+        {{/* 説明文はサイドバー幅では入力欄より場所を取るので短くしてある（#19）。
+             ただし次の 4 つの事実は落とさないこと。TestPostListMarkup が固定している:
+             コストは下がらない / 効くのはこのページだけ / 文字数はコードポイント数 /
+             いいね数が不明な投稿は除外される。
+             【<details> に畳まないこと。】3 本は aria-describedby の参照先で、閉じた
+             <details> の中に入れると読み上げから外れうる。畳むより短くする。 */}}
+        <p class="hint" id="f-likes-note">いいね数が不明な投稿は、最小いいね数を指定すると除外されます（0 件と区別できないため）。</p>
+        <p class="hint" id="filter-runes-note">文字数は本文の Unicode コードポイント数です（バイト数ではありません）。絵文字は 2 文字以上に数えることがあります。</p>
+        <p class="hint" id="filter-scope-note">効くのはこのページの取得済み投稿だけです。ページを移動すると解除され、移動先の取得には新たにコストが発生します。ページをまたぐ絞り込みは検索条件で指定してください。</p>
+        <p class="hint" id="filter-cost-note">絞り込んでもコストは下がりません。post read は取得した時点で課金済みです。</p>
         <div class="actions">
           <button type="button" id="filter-reset" class="secondary">絞り込みを解除</button>
           <p class="filter-count" id="filter-count" role="status">{{num .Result.ResultCount}} / {{num .Result.ResultCount}} 件表示中</p>
@@ -119,6 +114,24 @@
       </details>
     </div>
     {{end}}
+
+    {{/* ここから下は参照情報。1 度確認すれば済むものなので操作部より後に置く。 */}}
+    <div class="query-box">
+      <strong>生成されたクエリ</strong>
+      <code>{{.Result.QueryString}}</code>
+      <p class="hint">{{.Result.QueryRunes}} 文字 / 上限 {{.Result.QueryLimit}} 文字（参考: {{.Result.QueryBytes}} バイト）</p>
+    </div>
+
+    {{/* セッション累計はヘッダのバッジに出ているので繰り返さない（#19）。
+         「今回の推定コスト」はこのページ固有の値でヘッダには無いため残す。 */}}
+    <ul class="meta-list">
+      <li>表示中 <span class="strong">{{num .Result.ResultCount}} 件</span>（検索範囲: {{.Result.EndpointName}} / 取得件数 {{.Result.MaxResults}}）</li>
+      {{if .Result.StartDisplay}}<li>期間: {{.Result.StartDisplay}} 〜 {{.Result.EndDisplay}}（{{.TZ}}）</li>{{end}}
+      <li>今回の推定コスト: <span class="strong">{{usd .Result.SpentUSD}}</span></li>
+      {{if .Result.RateLimit}}<li>レートリミット残り: {{.Result.RateLimit.Remaining}} / {{.Result.RateLimit.Limit}}{{if .RateLimitReset}}（{{.RateLimitReset}} にリセット・{{.TZ}}）{{end}}</li>{{end}}
+    </ul>
+
+    <p class="hint">このページの再読み込みは再検索になります（同一投稿の再取得は 24 時間以内なら追加の金銭コストが発生しにくいですが、cap とレートリミットは消費します）。</p>
   </div>
 
   <div class="results-main">

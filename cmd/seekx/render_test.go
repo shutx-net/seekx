@@ -208,6 +208,14 @@ func TestRenderTemplates(t *testing.T) {
 		if strings.Contains(out, "ZgotmplZ") {
 			t.Error("テンプレートが値を安全でないと判断した（ZgotmplZ）")
 		}
+		// セッション累計はヘッダのバッジと完全に同じ値だったので消した（#19）。
+		// 結果ページのサイドバーと揃えてある。
+		if strings.Contains(out, "セッション累計") {
+			t.Error("セッション累計はヘッダのバッジと重複する（見積り画面には出さない）")
+		}
+		if !strings.Contains(out, "セッション ") {
+			t.Error("セッション累計はヘッダのバッジに残っていること（消してはいない）")
+		}
 	})
 
 	t.Run("estimate.html（ゲートで実行不可）", func(t *testing.T) {
@@ -1385,8 +1393,12 @@ func TestPostListMarkup(t *testing.T) {
 		`name="cols" value="3"`,
 		`id="f-no-reply"`, `id="f-no-repost"`, `id="f-no-quote"`,
 		`id="f-no-sensitive"`, `id="f-no-link"`,
-		"絞り込んでもコストは下がりません",
-		"検索結果の全体には及びません",
+		// 絞り込みの説明文は #19 で短くした。文言そのものではなく、
+		// 【落としてはいけない 4 つの事実】が残っていることを固定する。
+		"絞り込んでもコストは下がりません", // コストは下がらない
+		"このページの取得済み投稿だけ",   // 効く範囲
+		"Unicode コードポイント数", // 文字数の定義
+		"いいね数が不明な投稿",       // メトリクス欠損の扱い
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("コントロールに %q が含まれていない", want)
@@ -1559,6 +1571,51 @@ func TestResultsSidebarLayout(t *testing.T) {
 	// 読み上げ順・フォーカス順は「コントロール → カード」のまま。
 	if strings.Index(body, "results-side") > strings.Index(body, `id="post-list"`) {
 		t.Error("サイドバーはカードより前に置く（フォーカス順が変わる）")
+	}
+
+	// サイドバーの並びは「注意 → 操作 → 参照」（#19）。参照情報を先に置くと、
+	// 操作部に届くまでスクロールが要り、内部スクロールで隠れるのも操作部の側になる。
+	if strings.Index(side, `id="list-controls"`) > strings.Index(side, `class="query-box"`) {
+		t.Error("操作部（列数・絞り込み）は参照情報より前に置く")
+	}
+
+	// セッション累計はヘッダのバッジと重複していたので消した（#19）。
+	// ページ固有の「今回の推定コスト」は残す。
+	if strings.Contains(side, "セッション累計") {
+		t.Error("セッション累計はヘッダのバッジと重複する（サイドバーには出さない）")
+	}
+	if !strings.Contains(side, "今回の推定コスト") {
+		t.Error("このページのコストはサイドバーに残す（ヘッダには無い値）")
+	}
+	if !strings.Contains(body, "セッション ") {
+		t.Error("セッション累計はヘッダのバッジに残っていること（消してはいない）")
+	}
+}
+
+// TestSidebarPutsNoticesFirst は警告・部分エラーが操作部より前に出ることを確認する（#19）。
+// 条件付きなので普段は場所を取らないが、出たときは注意を要するので最上段に置く。
+func TestSidebarPutsNoticesFirst(t *testing.T) {
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
+	// このフィクスチャは投稿 1 件 + 部分エラー 1 件。操作部と通知が両方出る。
+	v := sampleViewResult(t, "search_recent_partial_errors.json")
+	out := stripScripts(mustRender(t, app, "results.html", ResultsPage{
+		Page:       app.page("検索結果", cost.CapStatus{}, xapi.EndpointRecent),
+		Result:     v,
+		FormURL:    "/",
+		EmptyHints: emptyHints(query.SearchForm{}),
+	}))
+
+	side := sliceDiv(t, out, `<div class="results-side"`)
+	iNotice := strings.Index(side, "notice-warn")
+	iControls := strings.Index(side, `id="list-controls"`)
+	if iNotice < 0 {
+		t.Fatal("部分エラーの通知が出ていない（フィクスチャが変わった可能性）")
+	}
+	if iControls < 0 {
+		t.Fatal("操作部が出ていない")
+	}
+	if iNotice > iControls {
+		t.Error("警告・部分エラーは操作部より前に置く")
 	}
 }
 
