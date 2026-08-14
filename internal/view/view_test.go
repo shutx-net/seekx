@@ -160,8 +160,8 @@ func TestBuildView(t *testing.T) {
 		if first.PermalinkURL != "https://x.com/sample_taro/status/1900000000000000001" {
 			t.Errorf("恒久リンク: got %q", first.PermalinkURL)
 		}
-		if v.NextToken == "" || v.NewestID == "" || v.OldestID == "" {
-			t.Errorf("meta の引き継ぎ: next=%q newest=%q oldest=%q", v.NextToken, v.NewestID, v.OldestID)
+		if v.NextToken == "" {
+			t.Errorf("meta の引き継ぎ: next=%q", v.NextToken)
 		}
 	})
 

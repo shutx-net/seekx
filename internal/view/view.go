@@ -37,8 +37,6 @@ type ViewResult struct {
 	MaxResults    int
 	NextToken     string
 	PrevToken     string
-	NewestID      string
-	OldestID      string
 	SpentUSD      float64 // 今回のリクエストで発生した推定コスト
 	SessionUSD    float64
 	RateLimit     *xapi.RateLimit
@@ -190,8 +188,6 @@ func BuildView(resp *xapi.SearchResponse, opt ViewOptions) ViewResult {
 	out.ResultCount = resp.Meta.ResultCount
 	out.NextToken = resp.Meta.NextToken
 	out.PrevToken = resp.Meta.PreviousToken
-	out.NewestID = resp.Meta.NewestID
-	out.OldestID = resp.Meta.OldestID
 
 	for _, pe := range resp.Errors {
 		out.PartialErrors = append(out.PartialErrors, pe.Describe())

@@ -24,7 +24,6 @@
       {{if .Result.StartDisplay}}<li>期間: {{.Result.StartDisplay}} 〜 {{.Result.EndDisplay}}（{{.TZ}}）</li>{{end}}
       <li>今回の推定コスト: <span class="strong">{{usd .Result.SpentUSD}}</span> / セッション累計 {{usd .SessionUSD}}</li>
       {{if .Result.RateLimit}}<li>レートリミット残り: {{.Result.RateLimit.Remaining}} / {{.Result.RateLimit.Limit}}{{if .RateLimitReset}}（{{.RateLimitReset}} にリセット・{{.TZ}}）{{end}}</li>{{end}}
-      {{if .Result.NewestID}}<li>newest_id: <code>{{.Result.NewestID}}</code> / oldest_id: <code>{{.Result.OldestID}}</code>（差分取得の下地）</li>{{end}}
     </ul>
 
     <p class="hint">このページの再読み込みは再検索になります（同一投稿の再取得は 24 時間以内なら追加の金銭コストが発生しにくいですが、cap とレートリミットは消費します）。</p>
