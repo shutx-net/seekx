@@ -811,6 +811,9 @@ func TestSecurityHeaders(t *testing.T) {
 			for _, want := range []string{
 				"default-src 'none'", "script-src 'self'",
 				"img-src 'self' https://pbs.twimg.com",
+				// 既定のプロフィール画像の配信元（フォロワー一覧で頻出）。media-src などに足しても
+				// 画像は止められたままなので、img-src の中にあることまで見る。
+				"img-src 'self' https://pbs.twimg.com https://abs.twimg.com;",
 				"media-src 'self' https://video.twimg.com",
 				"connect-src 'none'", "base-uri 'none'", "frame-ancestors 'none'",
 			} {

@@ -209,11 +209,14 @@ func newRouter(app *App) http.Handler {
 // スタイル注入はスクリプト注入より影響が小さいので、この妥協は受け入れる。
 //
 // ホストは testdata/ の実レスポンスから確認した（画像 pbs.twimg.com / 動画 video.twimg.com）。
+// 既定のプロフィール画像（default_profile_images）は abs.twimg.com から配信される（実測済み）。
+// 許可しないと、アイコンを設定していないユーザー（検索結果の投稿者・フォロワー一覧）の
+// アイコンだけが CSP に止められて欠ける。
 // connect-src 'none' は JS が fetch / XHR / WebSocket を使わないことと一致する。
 const contentSecurityPolicy = "default-src 'none'; " +
 	"script-src 'self'; " +
 	"style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' https://pbs.twimg.com; " +
+	"img-src 'self' https://pbs.twimg.com https://abs.twimg.com; " +
 	"media-src 'self' https://video.twimg.com; " +
 	"form-action 'self'; " +
 	"base-uri 'none'; " +
