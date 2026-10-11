@@ -202,13 +202,38 @@ func followersFormURL(f query.FollowersForm) string {
 func followersPageSizeOptions() []MaxOption {
 	opts := make([]MaxOption, 0, len(followersPageSizes))
 	for _, n := range followersPageSizes {
-		label := fmt.Sprintf("%s 人（最大 $%.2f）", humanInt(n), cost.FollowersCostFor(n))
+		label := followersPageSizeLabel(n)
 		if n == query.FollowersPageSizeDefault {
 			label += "・既定"
 		}
 		opts = append(opts, MaxOption{Value: n, Label: label})
 	}
 	return opts
+}
+
+// followersPageSizeOptionsWith は followersPageSizeOptions に、選択肢に無い current を昇順の位置に
+// 足して返す（current は検証の範囲内の値であること）。
+//
+// URL を書き換えた・見積りから「条件を修正する」で戻ったなどで選択肢に無い人数が来たとき、選ばれた
+// 選択肢が無いとブラウザが先頭（10 人）を選び、送り直したときに人数が黙って変わってしまうため。
+func followersPageSizeOptionsWith(current int) []MaxOption {
+	opts := followersPageSizeOptions()
+	i := 0
+	for i < len(opts) && opts[i].Value < current {
+		i++
+	}
+	if i < len(opts) && opts[i].Value == current {
+		return opts
+	}
+	opts = append(opts, MaxOption{})
+	copy(opts[i+1:], opts[i:])
+	opts[i] = MaxOption{Value: current, Label: followersPageSizeLabel(current)}
+	return opts
+}
+
+// followersPageSizeLabel は 1 ページの人数の選択肢の表示（「100 人（最大 $1.00）」）。
+func followersPageSizeLabel(n int) string {
+	return fmt.Sprintf("%s 人（最大 $%.2f）", humanInt(n), cost.FollowersCostFor(n))
 }
 
 // ---------------------------------------------------------------------------
@@ -458,14 +483,17 @@ func (a *App) fetchFollowers(ctx context.Context, p xapi.FollowersParams) (*xapi
 // Page の Endpoint を EndpointRecent に固定してよい理由は renderErrorTo と同じ
 // （Endpoint が効くのは CountsCost だけで、followers_form.html と layout.html はそれを使わない）。
 func (a *App) renderFollowersForm(w http.ResponseWriter, r *http.Request, f query.FollowersForm, errs []string, status int) {
-	if f.MaxResults <= 0 {
+	// 範囲外の人数（未指定・検証で弾いた値）は既定を選んで出す。範囲内でも選択肢に無い値は、
+	// followersPageSizeOptionsWith がその選択肢を足して選ぶ（どちらも、選ばれた選択肢が無いまま
+	// ブラウザが先頭の 10 人を選ぶことを防ぐ）。
+	if f.MaxResults < xapi.FollowersMaxResultsMin || f.MaxResults > xapi.FollowersMaxResultsMax {
 		f.MaxResults = query.FollowersPageSizeDefault
 	}
 	p := FollowersFormPage{
 		Page:            a.page("フォロワー取得", a.capStatus(r.Context()), xapi.EndpointRecent),
 		Form:            f,
 		Errors:          errs,
-		PageSizeOptions: followersPageSizeOptions(),
+		PageSizeOptions: followersPageSizeOptionsWith(f.MaxResults),
 		LookupCost:      cost.UserLookupCost(),
 	}
 	if a.cfg.FixtureMode() {

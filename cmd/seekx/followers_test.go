@@ -1849,3 +1849,49 @@ func TestFollowersLookupProblemsMatchStatus(t *testing.T) {
 		})
 	}
 }
+
+// TestFollowersFormKeepsPageSize は、選択肢に無い人数や範囲外の人数でフォームを開いたとき、
+// 選ばれた選択肢が無いまま（ブラウザが先頭の 10 人を選ぶ状態）にならないことを固定する。
+// 送り直したときに 1 ページの人数が黙って変わるのを防ぐため。
+func TestFollowersFormKeepsPageSize(t *testing.T) {
+	app := testApp(t, config.Config{FixtureDir: fixtureDir})
+	h := newRouter(app)
+	cases := []struct {
+		name       string
+		target     string
+		wantStatus int
+		selected   string   // 選ばれているべき選択肢
+		values     []string // 選択肢の並び（昇順）
+	}{
+		{"選択肢に無い範囲内の値は足して選ぶ", "/followers?max=50&username=nasa", http.StatusOK,
+			`<option value="50" selected>50 人（最大 $0.50）</option>`, []string{"10", "50", "100", "500", "1000"}},
+		{"範囲外の値は既定を選ぶ", "/followers?max=5000&mode=estimate&username=nasa", http.StatusBadRequest,
+			`<option value="100" selected>`, []string{"10", "100", "500", "1000"}},
+		{"数字でない値は既定を選ぶ", "/followers?max=abc&mode=estimate&username=nasa", http.StatusBadRequest,
+			`<option value="100" selected>`, []string{"10", "100", "500", "1000"}},
+		{"対照: 選択肢にある値はそのまま", "/followers?max=500&username=nasa", http.StatusOK,
+			`<option value="500" selected>`, []string{"10", "100", "500", "1000"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := serveGet(t, h, tc.target)
+			if rec.Code != tc.wantStatus {
+				t.Errorf("status: got %d, want %d", rec.Code, tc.wantStatus)
+			}
+			sel := pageSizeSelect(t, rec.Body.String())
+			if !strings.Contains(sel, tc.selected) {
+				t.Errorf("%q が選ばれているべき:\n%s", tc.selected, sel)
+			}
+			if n := strings.Count(sel, " selected"); n != 1 {
+				t.Errorf("選ばれた選択肢はちょうど 1 つであるべき: got %d\n%s", n, sel)
+			}
+			var got []string
+			for _, part := range strings.Split(sel, `<option value="`)[1:] {
+				got = append(got, part[:strings.Index(part, `"`)])
+			}
+			if strings.Join(got, ",") != strings.Join(tc.values, ",") {
+				t.Errorf("選択肢の並び: got %v, want %v", got, tc.values)
+			}
+		})
+	}
+}
