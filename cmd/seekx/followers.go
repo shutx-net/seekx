@@ -599,18 +599,10 @@ func followersErrorSteps(k xapi.ErrorKind) []string {
 			"表示されたリセット時刻以降に再試行してください（429 は課金されません）。",
 			"リセット時刻が出ていない場合は、15 分ほど待ってから再試行してください。",
 		}
-	case xapi.KindServer:
-		return []string{"数分待って再試行してください（自動で 3 回まで再試行しています）。"}
-	case xapi.KindNetwork:
-		return []string{
-			"コンテナからインターネットに出られるか確認してください。",
-			"プロキシ環境の場合は HTTPS_PROXY の設定を確認してください。",
-		}
-	case xapi.KindDecode:
-		return []string{
-			"技術的な詳細のレスポンス断片を確認してください。",
-			"API のレスポンス形式が変わった可能性があります（フィールド名の変更）。",
-		}
+	case xapi.KindServer, xapi.KindNetwork, xapi.KindDecode:
+		// サーバ側の障害・通信・レスポンス形式の問題はエンドポイントに依らないので、検索と同じ手順を使う
+		// （文言、特に再試行の回数を 2 か所に持たない）。
+		return errorSteps(k)
 	default:
 		// KindUsageCap はフォロワー取得では起きない（月次 cap は post read の上限で、ユーザーの読み取りは
 		// GateAllowsFor(ReadUsers) が止めない）。
