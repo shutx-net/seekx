@@ -1,0 +1,20 @@
+{
+  "data": {
+    "id": "20000003",
+    "name": "フォロワー 0 人のサンプル",
+    "username": "fx_empty",
+    "profile_image_url": "https://pbs.twimg.com/profile_images/2000000000000000003/empty_normal.jpg",
+    "verified": false,
+    "verified_type": "none",
+    "description": "フィクスチャのフォロワー 0 人のアカウントです。",
+    "url": "",
+    "protected": false,
+    "created_at": "2024-07-08T00:00:00.000Z",
+    "public_metrics": {
+      "followers_count": 0,
+      "following_count": 3,
+      "tweet_count": 1,
+      "listed_count": 0
+    }
+  }
+}

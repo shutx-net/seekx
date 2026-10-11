@@ -1,0 +1,114 @@
+{
+  "data": [
+    {
+      "id": "30000001",
+      "name": "サンプル ファン",
+      "username": "sample_fan01",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000001/fan01_normal.jpg",
+      "verified": false,
+      "verified_type": "none",
+      "description": "猫と写真が好きです。\n東京在住。",
+      "location": "東京",
+      "url": "https://t.co/fixture02",
+      "protected": false,
+      "created_at": "2015-06-07T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 120,
+        "following_count": 80,
+        "tweet_count": 4567,
+        "listed_count": 3
+      }
+    },
+    {
+      "id": "30000002",
+      "name": "Sample Blue",
+      "username": "sample_fan02",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000002/fan02_normal.jpg",
+      "verified": true,
+      "verified_type": "blue",
+      "description": "Travel photos and coffee.",
+      "location": "Osaka, Japan",
+      "url": "https://t.co/fixture03",
+      "protected": false,
+      "created_at": "2018-03-04T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 5400,
+        "following_count": 310,
+        "post_count": 12000,
+        "listed_count": 21
+      }
+    },
+    {
+      "id": "30000003",
+      "name": "鍵付きのファン",
+      "username": "sample_fan03",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000003/fan03_normal.jpg",
+      "verified": false,
+      "verified_type": "none",
+      "description": "",
+      "url": "",
+      "protected": true,
+      "created_at": "2020-09-10T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 15,
+        "following_count": 42,
+        "tweet_count": 230,
+        "listed_count": 0
+      }
+    },
+    {
+      "id": "30000004",
+      "name": "=HYPERLINK(\"https://example.com\")",
+      "username": "sample_fan04",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000004/fan04_normal.jpg",
+      "verified": false,
+      "verified_type": "none",
+      "description": "@sample_star さんのファンです",
+      "location": "-",
+      "url": "",
+      "protected": false,
+      "created_at": "2019-12-24T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 8,
+        "following_count": 150,
+        "tweet_count": 77,
+        "listed_count": 0
+      }
+    },
+    {
+      "id": "30000005",
+      "name": "<img src=x onerror=alert(1)>",
+      "username": "sample_fan05",
+      "profile_image_url": "https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png",
+      "verified": false,
+      "verified_type": "none",
+      "description": "</script><script>alert(1)</script>\n2 行目",
+      "url": "",
+      "protected": false,
+      "created_at": "2023-02-14T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 0,
+        "following_count": 5,
+        "tweet_count": 0,
+        "listed_count": 0
+      }
+    },
+    {
+      "id": "30000006",
+      "name": "サンプル 官公庁",
+      "username": "sample_gov",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000006/gov_normal.jpg",
+      "verified": true,
+      "verified_type": "government",
+      "description": "サンプルの行政機関の公式アカウントです。",
+      "location": "東京都千代田区",
+      "url": "https://t.co/fixture04",
+      "protected": false,
+      "created_at": "2010-04-01T00:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "result_count": 6,
+    "next_token": "FIXTUREPAGE2ZZZZ"
+  }
+}

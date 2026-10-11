@@ -1,0 +1,21 @@
+{
+  "data": {
+    "id": "20000001",
+    "name": "サンプル 星子",
+    "username": "sample_star",
+    "profile_image_url": "https://pbs.twimg.com/profile_images/2000000000000000001/star_normal.jpg",
+    "verified": true,
+    "verified_type": "blue",
+    "description": "フィクスチャの人気アカウントです。",
+    "location": "日本",
+    "url": "https://t.co/fixture01",
+    "protected": false,
+    "created_at": "2012-01-01T00:00:00.000Z",
+    "public_metrics": {
+      "followers_count": 12345,
+      "following_count": 210,
+      "tweet_count": 9876,
+      "listed_count": 55
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "data": [
+    {
+      "id": "30000007",
+      "name": "サンプル ファン 07",
+      "username": "sample_fan07",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000007/fan07_normal.jpg",
+      "verified": false,
+      "verified_type": "none",
+      "description": "2 ページ目のフォロワーです。",
+      "url": "",
+      "protected": false,
+      "created_at": "2016-01-07T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 70,
+        "following_count": 71,
+        "tweet_count": 700,
+        "listed_count": 0
+      }
+    },
+    {
+      "id": "30000008",
+      "name": "サンプル ファン 08",
+      "username": "sample_fan08",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000008/fan08_normal.jpg",
+      "verified": false,
+      "verified_type": "none",
+      "description": "2 ページ目のフォロワーです。",
+      "url": "",
+      "protected": false,
+      "created_at": "2016-01-08T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 80,
+        "following_count": 81,
+        "tweet_count": 800,
+        "listed_count": 0
+      }
+    },
+    {
+      "id": "30000009",
+      "name": "サンプル ファン 09",
+      "username": "sample_fan09",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000009/fan09_normal.jpg",
+      "verified": false,
+      "verified_type": "none",
+      "description": "2 ページ目のフォロワーです。",
+      "url": "",
+      "protected": false,
+      "created_at": "2016-01-09T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 90,
+        "following_count": 91,
+        "tweet_count": 900,
+        "listed_count": 1
+      }
+    },
+    {
+      "id": "30000010",
+      "name": "サンプル ファン 10",
+      "username": "sample_fan10",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000010/fan10_normal.jpg",
+      "verified": false,
+      "verified_type": "none",
+      "description": "2 ページ目のフォロワーです。",
+      "url": "",
+      "protected": false,
+      "created_at": "2016-01-10T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 100,
+        "following_count": 101,
+        "tweet_count": 1000,
+        "listed_count": 1
+      }
+    },
+    {
+      "id": "30000011",
+      "name": "サンプル ファン 11",
+      "username": "sample_fan11",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/3000000000000000011/fan11_normal.jpg",
+      "verified": false,
+      "verified_type": "none",
+      "description": "2 ページ目のフォロワーです。",
+      "url": "",
+      "protected": false,
+      "created_at": "2016-01-11T00:00:00.000Z",
+      "public_metrics": {
+        "followers_count": 110,
+        "following_count": 111,
+        "tweet_count": 1100,
+        "listed_count": 2
+      }
+    }
+  ],
+  "meta": {
+    "result_count": 5,
+    "next_token": "FIXTUREPAGE3ZZZZ"
+  }
+}
