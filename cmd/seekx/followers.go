@@ -10,6 +10,7 @@ package main
 //   - テンプレートに *http.Request や Config をそのまま渡さない（ViewModel だけを渡す）
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/shutx-net/seekx/internal/cost"
 	"github.com/shutx-net/seekx/internal/query"
+	"github.com/shutx-net/seekx/internal/view"
 	"github.com/shutx-net/seekx/internal/xapi"
 )
 
@@ -51,6 +53,33 @@ type FollowersFormPage struct {
 	// 存在しないかもしれない架空の名前を勧めないため。
 	FixtureExamples []string
 }
+
+// FollowersEstimatePage はフォロワー取得の見積り画面（ユーザー検索の結果）。
+type FollowersEstimatePage struct {
+	Page
+	Form query.FollowersForm
+	// User は API が返した対象ユーザー。カードに出す。
+	User view.ViewUser
+	Est  cost.FollowersEstimate
+	// LookupCost はこの見積り（ユーザー検索 1 回）の金額。すでに発生している額と再見積りのラベルに出す。
+	LookupCost float64
+	Warnings   []string
+	Allowed    bool
+	GateReason string
+	// ExecuteURL は最初のページの取得。ReestimateURL は同じアカウントの見積りのやり直し。
+	// どちらも API が返したユーザー名（と ID）から作る（handleFollowersEstimate を参照）。
+	ExecuteURL    string
+	ReestimateURL string
+	// FormURL は「条件を修正する」。入力したとおりの値でフォームに戻す。
+	FormURL string
+}
+
+// NoFollowers はフォロワーが 0 人と分かっているかを返す。0 人なら取得しても返るユーザーがいないので、
+// テンプレートは取得のリンクを出さない。
+//
+// 【不明（TotalKnown が偽）を 0 人と扱わない】フォロワー数が不明のときも Est.Total は 0 なので、
+// Total だけを見ると、指標が欠けたアカウントの取得のリンクまで消えてしまう。
+func (p FollowersEstimatePage) NoFollowers() bool { return p.Est.TotalKnown && p.Est.Total == 0 }
 
 // ---------------------------------------------------------------------------
 // フォームと URL の相互変換（全状態を URL に載せる・D-23）
@@ -144,13 +173,120 @@ func followersPageSizeOptions() []MaxOption {
 // ハンドラ
 // ---------------------------------------------------------------------------
 
-// handleFollowers はフォロワー取得の画面（GET /followers）。
+// handleFollowers はフォロワー取得の画面（GET /followers）。mode=estimate で見積り（ユーザー検索）を行い、
+// それ以外はフォームを出す（API は呼ばない＝課金なし）。
 //
-// 見積り（mode=estimate・ユーザー検索）と取得（mode=execute・フォロワー一覧）は次以降のフェーズで足す。
-// それまでは mode に関わらずフォームを出す（API は呼ばない＝課金なし）。
+// 取得（mode=execute・フォロワー一覧）はまだ無く、フォームを出す（見積り画面の取得のリンクも、
+// いまはフォームに戻る）。
 func (a *App) handleFollowers(w http.ResponseWriter, r *http.Request) {
-	f := parseFollowersForm(r.URL.Query())
-	a.renderFollowersForm(w, r, f, nil, http.StatusOK)
+	q := r.URL.Query()
+	f := parseFollowersForm(q)
+
+	switch mode := q.Get("mode"); mode {
+	case "estimate":
+		// 検証はトークンの確認より前に行う（検索の handleSearch と同じ順）。入力の誤りはトークンを
+		// 設定しても直らないので先に知らせる。どちらで止めても API は呼ばない（課金なし）。
+		if errs := query.ValidateFollowersLookup(f); len(errs) > 0 {
+			a.log.Info("validation failed（API は呼び出していません）", "errors", len(errs), "mode", mode, "path", followersPath)
+			a.renderFollowersForm(w, r, f, query.ValidationErrors(errs).Messages(), http.StatusBadRequest)
+			return
+		}
+		if !a.tokenReady() {
+			// renderTokenMissing はログを出さない（何を止めたかを知っているのはハンドラ）。
+			a.log.Info("トークン未設定のため実行しませんでした（API は呼び出していません）", "mode", mode, "path", followersPath)
+			a.renderTokenMissing(w, r, "フォロワーを取得する", followersFormURL(f))
+			return
+		}
+		params, err := query.BuildUserLookupParams(f)
+		if err != nil {
+			// 上の検証と同じ規則なので通常は来ない。来ても API は呼ばずにフォームへ戻す（課金なし）。
+			msgs := []string{err.Error()}
+			if verrs, ok := err.(query.ValidationErrors); ok {
+				msgs = verrs.Messages()
+			}
+			a.renderFollowersForm(w, r, f, msgs, http.StatusBadRequest)
+			return
+		}
+		a.handleFollowersEstimate(w, r, f, params)
+	default:
+		a.renderFollowersForm(w, r, f, nil, http.StatusOK)
+	}
+}
+
+// handleFollowersEstimate は対象アカウントをユーザー検索で引き、フォロワー数から取得の金額を見積る。
+// f は入力（検証済み）、params は f から組み立てたユーザー検索のパラメータ。
+func (a *App) handleFollowersEstimate(w http.ResponseWriter, r *http.Request, f query.FollowersForm, params xapi.UserLookupParams) {
+	ctx := r.Context()
+	cap := a.capStatus(ctx)
+
+	resp, _, err := a.lookupUser(ctx, params)
+	if err != nil {
+		a.renderFollowersAPIError(w, r, err, f)
+		return
+	}
+	if resp.Data == nil {
+		// 存在しない・凍結されたユーザーは HTTP 200 で data が無く errors だけが返る（エラーにはならない）。
+		// ユーザーが返っていないので課金されない見込みで、セッション累計にも計上しない。
+		// 名前は API が返していないので、実際に送った値（先頭の @ を落とした入力）を出す。
+		a.log.Info("ユーザー検索でユーザーが返りませんでした（課金なしの見込み）", "problems", len(resp.Errors))
+		a.renderUserProblems(w, r, "ユーザーが見つかりませんでした",
+			"@"+params.Username+" に当たるユーザーを X API が返しませんでした。ユーザー名の誤りのほか、"+
+				"アカウントが凍結・削除された可能性があります。ユーザーが返っていないため、課金されない見込みです。",
+			followersErrorSteps(xapi.KindNotFound), resp.Errors, followersFormURL(f))
+		return
+	}
+	// User: Read はユーザーが返ったときだけ 1 人分かかる（存在しないユーザーは上で返している）。
+	// フィクスチャモードは API を呼ばないので計上しない。
+	if !a.client.FixtureMode() {
+		a.session.Add(cost.UserLookupCost())
+	}
+
+	user := view.BuildUserView(*resp.Data, a.loc)
+
+	// リンクには API が返したユーザー名を使う。入力値には先頭の @ / ＠ が付き得るので、そのまま渡すと
+	// 取得の画面で「@@name」と出る。API が返さなかったとき（想定外）だけ、実際に送った値で代える。
+	// ID は取得（GET /2/users/:id/followers）に要るので、API が返した値をそのまま載せる。
+	username := user.Username
+	if username == "" {
+		username = params.Username
+	}
+	execute := query.FollowersForm{Username: username, UserID: user.ID, MaxResults: f.MaxResults}
+	reestimate := query.FollowersForm{Username: username, MaxResults: f.MaxResults}
+
+	// フォロワー取得は投稿を返さないので月次 cap（post read の上限）では止めない（いまは常に許可）。
+	allowed, reason := cost.GateAllowsFor(cost.ReadUsers, cap, a.cfg)
+
+	var warns []string
+	if user.Protected {
+		// 先頭に置く。取得のリンクは消さない（取得できるかどうかは試すまで分からず、取得できなくても
+		// ユーザーが返らなければ課金されない見込みのため）。
+		warns = append(warns, "鍵アカウントです。App-only の Bearer Token ではフォロワーを取得できない可能性が高いです"+
+			"（取得できなかった場合はユーザーが返らないため、課金されない見込みです）。")
+	}
+	for _, pe := range resp.Errors {
+		warns = append(warns, "X API が一部のエラーを返しました（HTTP 200）: "+pe.Describe())
+	}
+
+	p := FollowersEstimatePage{
+		Page:          a.page("フォロワー取得の見積り", cap, xapi.EndpointRecent),
+		Form:          f,
+		User:          user,
+		Est:           cost.EstimateFollowers(user.Metrics.Followers, user.Metrics.HasMetrics, f.MaxResults),
+		LookupCost:    cost.UserLookupCost(),
+		Warnings:      warns,
+		Allowed:       allowed,
+		GateReason:    reason,
+		ExecuteURL:    followersURL(execute, "execute", ""),
+		ReestimateURL: followersURL(reestimate, "estimate", ""),
+		FormURL:       followersFormURL(f),
+	}
+	a.render(w, http.StatusOK, "followers_estimate.html", p)
+}
+
+// lookupUser は User: Read の課金が発生する唯一の呼び出し箇所（executeSearch と同じ扱い）。
+// この関数の外から UserByUsername を呼んではならない。
+func (a *App) lookupUser(ctx context.Context, p xapi.UserLookupParams) (*xapi.UserLookupResponse, *xapi.RateLimit, error) {
+	return a.client.UserByUsername(ctx, p)
 }
 
 // renderFollowersForm はフォロワー取得のフォームを描画する。errs は入力の誤り（API は呼んでいない）。
@@ -175,4 +311,161 @@ func (a *App) renderFollowersForm(w http.ResponseWriter, r *http.Request, f quer
 		p.FixtureExamples = fixtureFollowerExamples
 	}
 	a.render(w, status, "followers_form.html", p)
+}
+
+// ---------------------------------------------------------------------------
+// エラー画面
+// ---------------------------------------------------------------------------
+
+// renderFollowersAPIError はフォロワー取得の API エラー画面（検索の renderAPIError に当たる）。
+// 戻り先・手順・文言をフォロワー取得のものにして渡す。生成クエリは無いので Query は空のまま。
+//
+// 【Steps と Text を省かない】省くと手順が出ず、文言が検索向けの既定
+// （「検索条件が…」「生成されたクエリを確認してください」）になる。
+func (a *App) renderFollowersAPIError(w http.ResponseWriter, r *http.Request, err error, f query.FollowersForm) {
+	a.renderAPIErrorTo(w, r, err, apiErrorView{
+		BackURL: followersFormURL(f),
+		Steps:   followersErrorSteps,
+		Text:    a.followersErrorText,
+	})
+}
+
+// followersErrorText はフォロワー取得の API エラーの見出しと本文（apiErrorView.Text）。
+// 400 / 401 / 403 / 404 / 429 をフォロワー取得向けにし、それ以外は ErrorKind の既定のままにする。
+// 429 のリセット時刻を表示タイムゾーンで出すため、App のメソッドにしてある。
+func (a *App) followersErrorText(ae *xapi.APIError) (heading, message string) {
+	switch ae.Kind {
+	case xapi.KindUnauthorized:
+		// 既定の本文は「.env の BEARER_TOKEN を確認」で、同じ画面の手順（設定画面で確認する）と食い違う。
+		// 設定画面の値は .env より優先されるので、設定画面だけを案内すれば足りる。
+		return ae.Kind.Title(), "認証に失敗しました（HTTP 401）。Bearer Token が正しいか、設定画面（" + settingsPath + "）で確認してください。"
+	case xapi.KindInvalidQuery:
+		if ae.Status == 0 {
+			// xapi が送る前に弾いた（パスを壊す値）。UserMessage は「HTTP 400・課金なし」と書くが、
+			// 実際には HTTP を送っていないので、そのままだと API を呼んだように読める。
+			return "入力を受け付けられませんでした",
+				"ユーザー名か ID に使えない文字が含まれるため、送信前に止めました（API は呼び出していません）。"
+		}
+		return "X API が要求を受け付けませんでした",
+			"ユーザー名・1 ページの人数・ページングトークンのいずれかが X API に受け付けられませんでした（HTTP 400・課金なし）。"
+	case xapi.KindForbidden:
+		return ae.Kind.Title(),
+			"X API がこの取得を許可しませんでした（HTTP 403）。App のアクセスレベルを確認してください。" +
+				"ユーザーが返っていないため、課金されない見込みです。"
+	case xapi.KindNotFound:
+		return "ユーザーが見つかりませんでした",
+			"X API が対象のユーザーを見つけられませんでした（HTTP 404）。ユーザー名の誤りのほか、" +
+				"アカウントが凍結・削除された可能性があります。ユーザーが返っていないため、課金されない見込みです。"
+	case xapi.KindRateLimited:
+		// リセット時刻はレスポンスヘッダ（x-rate-limit-reset）の値を優先する。【docs の回数だけで案内しない】
+		// docs は 15 分 300 リクエストとするが、古い移行ガイドにはフォロワー取得を 15 分 15 リクエストと
+		// 書いたものがある。どちらでも枠は 15 分なので、ヘッダが無いときは 15 分待てば外れない。
+		if reset := ae.RateLimit.ResetDisplay(a.loc); reset != "" {
+			msg := fmt.Sprintf("X API の回数の上限に達しました（HTTP 429・課金なし）。%s 以降に再試行してください。", reset)
+			if ae.RateLimit.Limit > 0 {
+				msg += fmt.Sprintf("X API が返したこの枠の上限は %s リクエストです。", humanInt(ae.RateLimit.Limit))
+			}
+			return ae.Kind.Title(), msg
+		}
+		return ae.Kind.Title(),
+			"X API の回数の上限に達しました（HTTP 429・課金なし）。リセット時刻が返らなかったため、" +
+				"15 分ほど待ってから再試行してください（docs の上限は 15 分あたり 300 リクエストです）。"
+	default:
+		return ae.Kind.Title(), ae.UserMessage(a.loc)
+	}
+}
+
+// followersErrorSteps は ErrorKind ごとの対処手順（apiErrorView.Steps）。検索の errorSteps を使わないのは、
+// 検索エンドポイントや生成クエリを前提にした手順になっているため。
+func followersErrorSteps(k xapi.ErrorKind) []string {
+	switch k {
+	case xapi.KindInvalidQuery:
+		return []string{
+			"フォームに戻り、ユーザー名（半角英数字と _ のみ。先頭の @ は省略できます）と 1 ページの人数を確認してください。",
+			"HTTP 400 は課金されません（送信前に止めた場合は API を呼び出していません）。",
+		}
+	case xapi.KindUnauthorized:
+		return []string{
+			"設定画面（" + settingsPath + "）で Bearer Token を確認してください。",
+			"X 開発者ポータルでトークンを再生成した場合は、新しいトークンを設定画面に入力してください。",
+		}
+	case xapi.KindForbiddenNotEnrolled:
+		return []string{
+			"X 開発者ポータルで App が Project に紐付いているか確認してください。",
+			"pay-per-use のクレジット残高を確認してください。",
+			"アクセスレベルがユーザー検索とフォロワー取得を含むか確認してください。",
+		}
+	case xapi.KindForbidden:
+		return []string{
+			"X 開発者ポータルで、App のアクセスレベルがユーザー検索とフォロワー取得を含むか確認してください。",
+			"鍵アカウントのフォロワーは、App-only の Bearer Token では取得できない見込みです。",
+		}
+	case xapi.KindNotFound:
+		return []string{
+			"ユーザー名の綴りを確認してください（先頭の @ は省略できます）。",
+			"X でそのアカウントが表示されるか（凍結・削除されていないか）を確認してください。",
+		}
+	case xapi.KindRateLimited:
+		return []string{
+			"表示されたリセット時刻以降に再試行してください（429 は課金されません）。",
+			"リセット時刻が出ていない場合は、15 分ほど待ってから再試行してください。",
+		}
+	case xapi.KindServer:
+		return []string{"数分待って再試行してください（自動で 3 回まで再試行しています）。"}
+	case xapi.KindNetwork:
+		return []string{
+			"コンテナからインターネットに出られるか確認してください。",
+			"プロキシ環境の場合は HTTPS_PROXY の設定を確認してください。",
+		}
+	case xapi.KindDecode:
+		return []string{
+			"技術的な詳細のレスポンス断片を確認してください。",
+			"API のレスポンス形式が変わった可能性があります（フィールド名の変更）。",
+		}
+	default:
+		// KindUsageCap はフォロワー取得では起きない（月次 cap は post read の上限で、ユーザーの読み取りは
+		// GateAllowsFor(ReadUsers) が止めない）。
+		return nil
+	}
+}
+
+// renderUserProblems は、HTTP 200 で data が無く errors だけが返ったとき（存在しないユーザー・
+// 読めないアカウントなど）のエラー画面。見出し・本文・手順は呼び出し側が渡す。
+//
+// X API としては成功の応答なので、技術的な詳細の HTTP ステータスは 200 と出し、errors の 1 行説明を並べる。
+// この画面自体のステータスは problemStatus が errors の種類から決める。
+func (a *App) renderUserProblems(w http.ResponseWriter, r *http.Request, heading, message string, steps []string, probs []xapi.ProblemDetail, backURL string) {
+	msgs := make([]string, 0, len(probs))
+	for _, pe := range probs {
+		msgs = append(msgs, pe.Describe())
+	}
+	p := ErrorPage{
+		Page:     a.page("エラー", a.capStatus(r.Context()), xapi.EndpointRecent),
+		Heading:  heading,
+		Message:  message,
+		Steps:    steps,
+		Status:   http.StatusOK,
+		Messages: msgs,
+		FormURL:  backURL,
+	}
+	a.render(w, problemStatus(probs), "error.html", p)
+}
+
+// problemStatus は data が無く errors だけが返ったときの、この画面のステータスを決める。
+// 読む権限が無い（鍵アカウントなど）→ 403、見つからない（存在しない・凍結）→ 404、それ以外 → 502。
+//
+// 両方が混ざっていたら 403 を優先する。権限が無いと言われたアカウントは存在しているので、
+// 「見つからない」より原因として具体的なため。errors が空（data も errors も無い想定外の応答）は 502。
+func problemStatus(probs []xapi.ProblemDetail) int {
+	for _, pe := range probs {
+		if pe.IsNotAuthorized() {
+			return http.StatusForbidden
+		}
+	}
+	for _, pe := range probs {
+		if pe.IsNotFound() {
+			return http.StatusNotFound
+		}
+	}
+	return http.StatusBadGateway
 }
