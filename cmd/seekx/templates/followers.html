@@ -66,7 +66,11 @@
     </div>
     {{else}}
     <div class="notice">
+      {{if .Continued}}
+      <strong>このページに返ったフォロワーはいませんでした。</strong>
+      {{else}}
       <strong>フォロワーは 0 人でした。</strong>
+      {{end}}
       <p class="hint">返ったユーザーが 0 人のため、課金は発生していません（課金は返ったユーザーの人数ぶんです）。</p>
     </div>
     {{end}}

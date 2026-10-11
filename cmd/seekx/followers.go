@@ -94,6 +94,10 @@ type FollowersPage struct {
 	TargetID       string
 	// PageSize は 1 ページの人数（max_results）。ページングのラベルと参照情報に出す。
 	PageSize int
+	// Continued は前後のページ（pagination_token 付きで開いたページ）か。返ったユーザーが 0 人のとき、
+	// 最初のページなら「フォロワーは 0 人」と言えるが、前後のページでは言えない（前のページまでに
+	// フォロワーがいた）ので文言を分ける。
+	Continued bool
 	// UnitCost はフォロワー 1 人あたりの金額で、今回のコストの内訳に出す。
 	UnitCost float64
 	NextURL  string
@@ -410,6 +414,7 @@ func (a *App) handleFollowersExecute(w http.ResponseWriter, r *http.Request, f q
 		TargetUsername: f.Username,
 		TargetID:       f.UserID,
 		PageSize:       params.MaxResults,
+		Continued:      params.PaginationToken != "",
 		UnitCost:       cost.FollowersCostFor(1),
 		NextCost:       cost.FollowersCostFor(params.MaxResults),
 		LookupCost:     cost.UserLookupCost(),

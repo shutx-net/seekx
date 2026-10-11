@@ -1755,3 +1755,40 @@ func TestFollowersFetchIgnoresPostCap(t *testing.T) {
 		t.Errorf("対照: 投稿の検索は cap 超過で止まるべき: status=%d searches=%d", rec.Code, searches)
 	}
 }
+
+// TestFollowersEmptyContinuedPage は、前後のページ（pagination_token 付き）で返ったユーザーが 0 人だった
+// とき、「フォロワーは 0 人でした」と言わないことを固定する。X が末尾に余分な next_token を返すと
+// 起こり得て、前のページまでにフォロワーがいたのに 0 人と表示してしまう。
+func TestFollowersEmptyContinuedPage(t *testing.T) {
+	const body = `{"meta":{"result_count":0,"previous_token":"PREVPREVPREVPREV"}}`
+	var got []*url.URL
+	srv := lookupServer(t, http.StatusOK, nil, body, &got)
+	app := testApp(t, config.Config{BearerToken: "token-for-test", APIBaseURL: srv.URL})
+	h := newRouter(app)
+
+	rec := serveGet(t, h, "/followers?id=20000001&max=100&mode=execute&token=NEXTNEXTNEXTNEXT&username=sample")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", rec.Code)
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, "このページに返ったフォロワーはいませんでした。") {
+		t.Errorf("前後のページで 0 人のときは「このページに返ったフォロワーはいませんでした」と出すべき:\n%s", truncate(out, 600))
+	}
+	if strings.Contains(out, "フォロワーは 0 人でした。") {
+		t.Error("前後のページで 0 人のときに「フォロワーは 0 人でした」と出してはいけない（前のページまでにフォロワーがいた）")
+	}
+	// 戻る手段は残す（前のページのトークンが返っていれば、金額付きのリンクを出す）。
+	if !strings.Contains(out, "token=PREVPREVPREVPREV") || !strings.Contains(out, "前の 100 人を取得（+$1.00）") {
+		t.Error("前のページへの金額付きのリンクを出すべき")
+	}
+	if app.session.Total() != 0 {
+		t.Errorf("返ったユーザーが 0 人なので課金は 0 のはず: got %v", app.session.Total())
+	}
+
+	// 対照: 最初のページ（トークンなし）で 0 人なら「フォロワーは 0 人でした」。
+	rec = serveGet(t, h, "/followers?id=20000001&max=100&mode=execute&username=sample")
+	out = rec.Body.String()
+	if !strings.Contains(out, "フォロワーは 0 人でした。") || strings.Contains(out, "このページに返ったフォロワーはいませんでした。") {
+		t.Errorf("最初のページで 0 人なら「フォロワーは 0 人でした」と出すべき:\n%s", truncate(out, 600))
+	}
+}
