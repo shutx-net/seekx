@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -793,7 +794,7 @@ func TestSecurityHeaders(t *testing.T) {
 	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	router := newRouter(app)
 
-	for _, path := range []string{"/", "/healthz", "/static/style.css", "/static/js/app.js"} {
+	for _, path := range []string{"/", "/healthz", "/static/style.css", "/static/js/app.js", "/static/js/csv.js"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, newTestRequest(http.MethodGet, path, nil))
@@ -838,7 +839,7 @@ func TestJavaScriptContentType(t *testing.T) {
 	app := testApp(t, config.Config{FixtureDir: fixtureDir})
 	router := newRouter(app)
 
-	for _, path := range []string{"/static/js/boot.js", "/static/js/app.js"} {
+	for _, path := range []string{"/static/js/boot.js", "/static/js/app.js", "/static/js/csv.js"} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, newTestRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
@@ -854,7 +855,7 @@ func TestJavaScriptContentType(t *testing.T) {
 
 // TestLayoutLoadsExternalScripts は boot.js が同期読み込みであることを確認する。
 // defer / async にすると最初のペイントに間に合わず、列数が 1 → N に切り替わる
-// ちらつきが出る（D-43）。
+// ちらつきが出る（D-43）。app.js と csv.js は DOM の構築後に走らせる位置にあることも見る。
 func TestLayoutLoadsExternalScripts(t *testing.T) {
 	b, err := templatesFS.ReadFile("templates/layout.html")
 	if err != nil {
@@ -868,12 +869,23 @@ func TestLayoutLoadsExternalScripts(t *testing.T) {
 	if !strings.Contains(html, `<script src="/static/js/app.js"></script>`) {
 		t.Error("app.js が読み込まれていない")
 	}
-	// boot.js は </head> より前、app.js は </body> の直前。
+	if !strings.Contains(html, `<script src="/static/js/csv.js"></script>`) {
+		t.Error("csv.js が属性なしで読み込まれていない（フォロワー一覧の CSV を保存できない）")
+	}
+	// boot.js は </head> より前、app.js と csv.js は本文の末尾（</body> の直前）。
 	if i, j := strings.Index(html, "boot.js"), strings.Index(html, "</head>"); i < 0 || j < 0 || i > j {
 		t.Error("boot.js は </head> より前に置く（最初のペイントより前に走らせる）")
 	}
 	if i, j := strings.Index(html, "app.js"), strings.Index(html, "</head>"); i >= 0 && j >= 0 && i < j {
 		t.Error("app.js は <head> に置かない（DOM 構築後に走らせる）")
+	}
+	// csv.js は読み込んだ時点で CSV のボタンとデータブロックを探す。それより前に置くと要素がまだ無く、
+	// 何もせずに終わる（ボタンが hidden のまま出ない）。app.js と同じく本文の末尾の、app.js の後に置く。
+	iHead := strings.Index(html, "</head>")
+	iApp := strings.Index(html, `<script src="/static/js/app.js"></script>`)
+	iCSV := strings.Index(html, `<script src="/static/js/csv.js"></script>`)
+	if iHead < 0 || iApp < 0 || iCSV < 0 || iCSV < iHead || iCSV < iApp {
+		t.Errorf("csv.js は app.js より後（本文の末尾）に置くべき: </head>=%d app.js=%d csv.js=%d", iHead, iApp, iCSV)
 	}
 }
 
@@ -1745,14 +1757,30 @@ func TestStyleSheetInvariants(t *testing.T) {
 	if strings.Contains(post, "display") {
 		t.Error(".post に display を指定してはいけない（hidden 属性が効かなくなる）")
 	}
+
+	// ユーザーカード（フォロワー一覧・見積り画面）。自己紹介は未加工で出すので、改行は .user-bio の
+	// pre-wrap が表す。上の "white-space: pre-wrap" は投稿の本文（.post-text）だけでも満たされるので、
+	// ブロックを切り出して見る。カードは一覧のグリッドの項目なので min-width: 0 を持ち、間隔は gap に
+	// 任せて margin を持たない（見積り画面では .user-target が間隔を持つ）。
+	if bio := cssBlock(t, css, ".user-bio {"); !strings.Contains(bio, "white-space: pre-wrap") {
+		t.Error(".user-bio に white-space: pre-wrap が無い（自己紹介の改行が詰まって表示される）")
+	}
+	card := cssBlock(t, css, ".user-card {")
+	if !strings.Contains(card, "min-width: 0") {
+		t.Error(".user-card に min-width: 0 が無い（トラック側の minmax(0, 1fr) と対にする）")
+	}
+	if strings.Contains(card, "margin") {
+		t.Error(".user-card に margin を持たせてはいけない（一覧では grid の gap と二重になる）")
+	}
 }
 
 // TestInlineScriptInvariants はインライン JS の不変条件と行数予算を固定する（D-35 / D-55）。
 func TestInlineScriptInvariants(t *testing.T) {
 	// #9 でインライン JS を static/*.js に移した。計測対象も一緒に移してある。
 	// 上限を回避するための移動ではないので、予算と不変条件はそのまま引き継ぐ。
+	// フォロワーの CSV 保存（csv.js）も同じ予算と不変条件の中に入れる。
 	var sb strings.Builder
-	for _, name := range []string{"static/js/boot.js", "static/js/app.js"} {
+	for _, name := range []string{"static/js/boot.js", "static/js/app.js", "static/js/csv.js"} {
 		b, err := staticFS.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s を読めない: %v", name, err)
@@ -1777,10 +1805,51 @@ func TestInlineScriptInvariants(t *testing.T) {
 			t.Errorf("script src は /static/ 配下のみ（D-35）: %q", m[1])
 		}
 	}
-	// ネットワークアクセスをしない。
+	// 全テンプレートの <script は、layout.html が全ページで読む外部ファイル 3 本と、フォロワー一覧の
+	// CSV のデータブロック 1 本だけ。データブロックは type が JS ではないのでブラウザは実行せず、
+	// CSP の script-src の対象にもならない（中身は TestFollowersCSVDataBlock が見る）。
+	// これ以外を足すと、インラインの実行コードが CSP に止められるか、この予算と不変条件の外にある
+	// JS が増える。数えるのはテンプレートのソースなので、コメントに <script と書いても数に入る
+	// （コメントでは「データブロック」のように書く）。
+	names, err := fs.Glob(templatesFS, "templates/*.html") // main.go の ParseFS と同じパターン
+	if err != nil {
+		t.Fatalf("テンプレートを列挙できない: %v", err)
+	}
+	scriptTag := regexp.MustCompile(`(?i)<script[^>]*>?`) // 大文字や閉じていない開始タグも拾う
+	scanned := map[string]bool{}
+	var tags []string
+	for _, name := range names {
+		b, err := templatesFS.ReadFile(name)
+		if err != nil {
+			t.Fatalf("%s を読めない: %v", name, err)
+		}
+		base := strings.TrimPrefix(name, "templates/")
+		scanned[base] = true
+		for _, tag := range scriptTag.FindAllString(string(b), -1) {
+			tags = append(tags, base+": "+tag)
+		}
+	}
+	// 対照: 走査が空振りしていないこと。パターンを誤ると、<script が 1 本も見つからないまま
+	// 下の比較だけが失敗する（または比較を緩めたときに無言で通る）ので、先に分かるようにする。
+	for _, must := range []string{"layout.html", "followers.html", "_cols.html", "results.html"} {
+		if !scanned[must] {
+			t.Errorf("テンプレートの走査に %s が含まれていない（templates/*.html を見ていない）", must)
+		}
+	}
+	// 並びは fs.Glob のファイル名順、同じファイルの中は出現順。
+	wantTags := []string{
+		`followers.html: <script type="application/json" id="csv-data">`,
+		`layout.html: <script src="/static/js/boot.js">`,
+		`layout.html: <script src="/static/js/app.js">`,
+		`layout.html: <script src="/static/js/csv.js">`,
+	}
+	if got, want := strings.Join(tags, "\n  "), strings.Join(wantTags, "\n  "); got != want {
+		t.Errorf("テンプレートの <script は layout.html の外部ファイル 3 本と followers.html のデータブロック 1 本だけであるべき:\n got:\n  %s\n want:\n  %s", got, want)
+	}
+	// ネットワークアクセスをしない（CSP も connect-src 'none'）。
 	for _, bad := range []string{"fetch(", "XMLHttpRequest", "WebSocket"} {
 		if strings.Contains(html, bad) {
-			t.Errorf("%q を使ってはいけない（絞り込みは取得済み DOM に対する操作）", bad)
+			t.Errorf("%q を使ってはいけない（絞り込みは取得済み DOM、CSV の保存は埋め込み済みのデータに対する操作）", bad)
 		}
 	}
 	// 表示状態を URL に載せない（D-36）。
@@ -1809,18 +1878,28 @@ func TestInlineScriptInvariants(t *testing.T) {
 		}
 	}
 
-	// 必須の要素（列数の保存キー・絞り込みの土台）。
+	// 必須の要素（列数の保存キー・絞り込みの土台・CSV の保存）。
 	for _, want := range []string{
 		`"seekx.cols"`,
 		`setAttribute("data-cols"`,
 		`removeAttribute("data-cols")`,
 		`getElementById("post-list")`,
+		// フォロワー一覧（followers.html の #user-list）でも列数とヘッダ高さの実測を効かせる。無いと app.js が
+		// 早期 return し、列数の切り替えも CSV の保存ボタンも（#list-controls ごと）hidden のまま出ない。
+		`getElementById("user-list")`,
 		`getElementById("list-controls")`,
 		`removeAttribute("hidden")`,
 		`setAttribute("hidden", "")`,
 		`dialog[open]`,
 		"setTimeout(apply, 150)",
 		"textContent",
+		// CSV の保存（csv.js）。ボタンと followers.html のデータブロックの id、保存後の Blob URL の破棄。
+		`getElementById("csv-download")`,
+		`getElementById("csv-data")`,
+		"URL.revokeObjectURL",
+		// 【加工しない】埋め込まれた CSV（BOM・クォート・無害化はサーバ側の view.FollowersCSVFile で済んでいる）を
+		// そのまま Blob にする。JS で BOM を足すと二重になる。
+		"new Blob([data.csv]",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("インライン JS に %q が無い", want)
@@ -1838,13 +1917,20 @@ func TestInlineScriptInvariants(t *testing.T) {
 	// 置いていたが、ヘッダが折り返すと値がズレて隙間が空くか操作部が潜る。
 	// 実測が正しい解決で、CSS では実現できない。
 	//
+	// 100 → 120 に引き上げた（フォロワーの CSV 保存）。内訳は csv.js の 20 行と、app.js の 1 行
+	// （#user-list も一覧として拾うのは行内の変更で、フォロワー一覧に無い #filter-reset の確認で 1 行増えた）。
+	// 引き上げの理由: ファイルの生成と保存はブラウザの JS でしかできない。BOM・クォート・無害化と
+	// いった整形はサーバ側（view.FollowersCSVFile）で済ませ、JS は埋め込まれた CSV を保存するだけに
+	// して増分を抑えた。
+	//
 	// この上限は「クライアント側ロジックを最小に保つ」方針の代理指標であって、
 	// 数字自体に意味は無い。JS が正しい道具なら、CSS に押し込むのではなく
 	// ここを更新して理由を書くこと。#9 で外部ファイル化したが、計測対象を
 	// static/*.js に移しただけで予算は維持している（上限の回避ではない）。
+	const maxLines = 120
 	count := strings.Count(html, "\n")
-	if count > 100 {
-		t.Errorf("JS の行数 = %d, want <= 100（D-55）", count)
+	if count > maxLines {
+		t.Errorf("JS の行数 = %d, want <= %d（D-55）", count, maxLines)
 	}
-	t.Logf("JS の行数: %d / 100", count)
+	t.Logf("JS の行数: %d / %d", count, maxLines)
 }

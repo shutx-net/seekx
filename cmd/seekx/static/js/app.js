@@ -10,7 +10,7 @@ document.addEventListener("click", function (ev) {
 });
 // 一覧の列数（保存・適用）と、取得済みカードの絞り込み。ネットワークアクセスは無い。
 (function () {
-  var list = document.getElementById("post-list"), controls = document.getElementById("list-controls");
+  var list = document.getElementById("post-list") || document.getElementById("user-list"), controls = document.getElementById("list-controls");
   if (!list || !controls) { // 一覧が無いページで --max の拡張だけが効くのを防ぐ（P-COLS-LEAK）
     document.documentElement.removeAttribute("data-cols");
     return;
@@ -73,7 +73,8 @@ document.addEventListener("click", function (ev) {
   }
   controls.addEventListener("input", onEdit);
   controls.addEventListener("change", onEdit);
-  document.getElementById("filter-reset").addEventListener("click", function () {
+  var resetBtn = document.getElementById("filter-reset"); // フォロワー一覧（#user-list）には絞り込みが無い
+  if (resetBtn) resetBtn.addEventListener("click", function () {
     var nums = controls.querySelectorAll("input[type='number']");
     var boxes = controls.querySelectorAll("input[type='checkbox']");
     for (var i = 0; i < nums.length; i++) nums[i].value = "";
