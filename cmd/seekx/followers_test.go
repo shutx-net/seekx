@@ -1792,3 +1792,60 @@ func TestFollowersEmptyContinuedPage(t *testing.T) {
 		t.Errorf("最初のページで 0 人なら「フォロワーは 0 人でした」と出すべき:\n%s", truncate(out, 600))
 	}
 }
+
+// TestFollowersLookupProblemsMatchStatus は、見積りのユーザー検索で errors だけが返ったとき、
+// 画面のステータスと見出し・本文・手順が食い違わないことを固定する（403 や 502 の画面に
+// 「見つかりませんでした」「綴りを確認」と出さない）。
+func TestFollowersLookupProblemsMatchStatus(t *testing.T) {
+	problem := func(typ string) string {
+		return `{"errors":[{"value":"sample","detail":"d","title":"t","resource_type":"user","parameter":"username","resource_id":"sample","type":"https://api.twitter.com/2/problems/` + typ + `"}]}`
+	}
+	cases := []struct {
+		name       string
+		body       string
+		wantStatus int
+		want       []string
+		bad        []string
+	}{
+		{"見つからない", problem("resource-not-found"), http.StatusNotFound,
+			[]string{"<h1>ユーザーが見つかりませんでした</h1>", "ユーザー名の綴りを確認してください"},
+			[]string{"読む権限が無い"}},
+		{"読む権限が無い", problem("not-authorized-for-resource"), http.StatusForbidden,
+			[]string{"<h1>ユーザーの情報を読めませんでした</h1>", "X API が @sample の情報を読む権限が無いと返しました。", "アクセスレベル"},
+			[]string{"見つかりませんでした", "ユーザー名の綴り"}},
+		{"分類できない", problem("something-else"), http.StatusBadGateway,
+			[]string{"<h1>ユーザーの情報を取得できませんでした</h1>", "エラーだけを返しました（HTTP 200）", "X API が返したエラーの内容を確認してください。"},
+			[]string{"見つかりませんでした", "ユーザー名の綴り"}},
+		{"errors も無い", `{}`, http.StatusBadGateway,
+			[]string{"<h1>ユーザーの情報を取得できませんでした</h1>"},
+			[]string{"見つかりませんでした", "ユーザー名の綴り"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []*url.URL
+			srv := lookupServer(t, http.StatusOK, nil, tc.body, &got)
+			app := testApp(t, config.Config{BearerToken: "token-for-test", APIBaseURL: srv.URL})
+			rec := serveGet(t, newRouter(app), estimateTarget("sample", "100"))
+			if rec.Code != tc.wantStatus {
+				t.Errorf("status: got %d, want %d", rec.Code, tc.wantStatus)
+			}
+			out := rec.Body.String()
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("%q が含まれていない:\n%s", want, truncate(out, 600))
+				}
+			}
+			for _, bad := range tc.bad {
+				if strings.Contains(out, bad) {
+					t.Errorf("ステータス %d の画面に %q を出してはいけない", tc.wantStatus, bad)
+				}
+			}
+			if !strings.Contains(out, "課金されない見込みです") {
+				t.Error("ユーザーが返っていないので、課金されない見込みであることを出すべき")
+			}
+			if app.session.Total() != 0 {
+				t.Errorf("ユーザーが返っていないので課金は 0 のはず: got %v", app.session.Total())
+			}
+		})
+	}
+}

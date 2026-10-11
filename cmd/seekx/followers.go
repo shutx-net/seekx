@@ -298,10 +298,8 @@ func (a *App) handleFollowersEstimate(w http.ResponseWriter, r *http.Request, f 
 		// ユーザーが返っていないので課金されない見込みで、セッション累計にも計上しない。
 		// 名前は API が返していないので、実際に送った値（先頭の @ を落とした入力）を出す。
 		a.log.Info("ユーザー検索でユーザーが返りませんでした（課金なしの見込み）", "problems", len(resp.Errors))
-		a.renderUserProblems(w, r, "ユーザーが見つかりませんでした",
-			"@"+params.Username+" に当たるユーザーを X API が返しませんでした。ユーザー名の誤りのほか、"+
-				"アカウントが凍結・削除された可能性があります。ユーザーが返っていないため、課金されない見込みです。",
-			followersErrorSteps(xapi.KindNotFound), resp.Errors, followersFormURL(f))
+		heading, message, steps := userLookupProblemText(resp.Errors, params.Username)
+		a.renderUserProblems(w, r, heading, message, steps, resp.Errors, followersFormURL(f))
 		return
 	}
 	// User: Read はユーザーが返ったときだけ 1 人分かかる（存在しないユーザーは上で返している）。
@@ -630,10 +628,37 @@ func followersProblemText(probs []xapi.ProblemDetail) (message string, steps []s
 			followersErrorSteps(xapi.KindNotFound)
 	default:
 		return "X API がフォロワーを返さず、エラーだけを返しました（HTTP 200）。" + noCharge,
-			[]string{
-				"技術的な詳細で、X API が返したエラーの内容を確認してください。",
-				"時間をおいて、見積りからやり直してください。",
-			}
+			unclassifiedProblemSteps()
+	}
+}
+
+// userLookupProblemText は、見積りのユーザー検索で data が無く errors だけが返ったときの見出し・本文・
+// 対処手順を返す。followersProblemText と同じく problemStatus で分類し、ステータスと本文を食い違わせない
+// （403 や 502 の画面に「見つかりませんでした・綴りを確認」と出さない）。username は実際に送った値。
+func userLookupProblemText(probs []xapi.ProblemDetail, username string) (heading, message string, steps []string) {
+	const noCharge = "ユーザーが返っていないため、課金されない見込みです。"
+	switch problemStatus(probs) {
+	case http.StatusNotFound:
+		return "ユーザーが見つかりませんでした",
+			"@" + username + " に当たるユーザーを X API が返しませんでした。ユーザー名の誤りのほか、" +
+				"アカウントが凍結・削除された可能性があります。" + noCharge,
+			followersErrorSteps(xapi.KindNotFound)
+	case http.StatusForbidden:
+		return "ユーザーの情報を読めませんでした",
+			"X API が @" + username + " の情報を読む権限が無いと返しました。" + noCharge,
+			followersErrorSteps(xapi.KindForbidden)
+	default:
+		return "ユーザーの情報を取得できませんでした",
+			"X API がユーザーを返さず、エラーだけを返しました（HTTP 200）。" + noCharge,
+			unclassifiedProblemSteps()
+	}
+}
+
+// unclassifiedProblemSteps は、errors だけが返り、その種類から原因を絞れないときの対処手順。
+func unclassifiedProblemSteps() []string {
+	return []string{
+		"技術的な詳細で、X API が返したエラーの内容を確認してください。",
+		"時間をおいて、見積りからやり直してください。",
 	}
 }
 
