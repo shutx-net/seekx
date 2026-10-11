@@ -65,6 +65,18 @@ type FollowersView struct {
 // （default_profile_normal.png）にも _200x200 の画像があることは実測済み。
 const userAvatarSize = "200x200"
 
+// userProfileURL はユーザーカードのプロフィールへのリンクを返す（ユーザー名が無ければ空）。
+//
+// 検索の profileURL は、投稿者が includes に無いときのプレースホルダ（unknownAuthorUsername）を空に
+// するが、ユーザーカードに出すのは API が返した実在のアカウントなので、@unknown という名前の人にも
+// リンクを付ける（表示要件: 表示名・@username・アイコンはプロフィールへリンクする）。
+func userProfileURL(username string) string {
+	if username == "" {
+		return ""
+	}
+	return "https://x.com/" + username
+}
+
 // BuildUserView は xapi.User をユーザーカードの表示モデルにする。
 // loc は作成日の表示に使うタイムゾーンで、nil なら UTC にする（Time.In(nil) は panic するため）。
 func BuildUserView(u xapi.User, loc *time.Location) ViewUser {
@@ -75,7 +87,7 @@ func BuildUserView(u xapi.User, loc *time.Location) ViewUser {
 		ID:              u.ID,
 		Name:            u.Name,
 		Username:        u.Username,
-		ProfileURL:      profileURL(u.Username),
+		ProfileURL:      userProfileURL(u.Username),
 		ProfileImageURL: profileImageURL(u.ProfileImageURL, userAvatarSize),
 		Description:     u.Description,
 		Location:        u.Location,

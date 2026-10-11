@@ -460,3 +460,21 @@ func TestBuildFollowersView(t *testing.T) {
 		}
 	})
 }
+
+// TestBuildUserViewLinksRealUnknown は、@unknown という名前の実在アカウントにもプロフィールへの
+// リンクを付けることを固定する。検索の profileURL は "unknown" を投稿者欠落のプレースホルダとして
+// 空にするので、それを流用するとこのユーザーだけリンクと CSV のプロフィール URL が消える。
+func TestBuildUserViewLinksRealUnknown(t *testing.T) {
+	vu := BuildUserView(xapi.User{ID: "1", Name: "n", Username: "unknown"}, time.UTC)
+	if vu.ProfileURL != "https://x.com/unknown" {
+		t.Errorf("@unknown のプロフィール URL: got %q, want %q", vu.ProfileURL, "https://x.com/unknown")
+	}
+	if got := FollowersCSVFile([]ViewUser{vu}); !strings.Contains(got, ",unknown,n,https://x.com/unknown,") {
+		t.Errorf("CSV のプロフィール URL も空にしてはいけない:\n%s", got)
+	}
+
+	// 対照: ユーザー名が無ければリンクは作らない（https://x.com/ だけのリンクにしない）。
+	if vu := BuildUserView(xapi.User{ID: "2", Name: "n"}, time.UTC); vu.ProfileURL != "" {
+		t.Errorf("ユーザー名が無いときのプロフィール URL は空であるべき: got %q", vu.ProfileURL)
+	}
+}
