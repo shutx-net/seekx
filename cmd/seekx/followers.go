@@ -81,6 +81,44 @@ type FollowersEstimatePage struct {
 // Total だけを見ると、指標が欠けたアカウントの取得のリンクまで消えてしまう。
 func (p FollowersEstimatePage) NoFollowers() bool { return p.Est.TotalKnown && p.Est.Total == 0 }
 
+// FollowersPage はフォロワー一覧（取得した 1 ページ分）の画面。
+//
+// 対象のユーザー名と ID は URL から来る（フォロワー取得の API は対象のユーザーを返さない）。取得は ID で行い、
+// ユーザー名は見出し・リンク・CSV のファイル名にだけ使う。URL を書き換えると両者が食い違い得るので、
+// 画面の参照情報には ID も並べる。
+type FollowersPage struct {
+	Page
+	Result view.FollowersView
+	// TargetUsername は先頭の @ を落とした対象のユーザー名。空なら見出しを ID で出す。
+	TargetUsername string
+	TargetID       string
+	// PageSize は 1 ページの人数（max_results）。ページングのラベルと参照情報に出す。
+	PageSize int
+	// UnitCost はフォロワー 1 人あたりの金額で、今回のコストの内訳に出す。
+	UnitCost float64
+	NextURL  string
+	PrevURL  string
+	// NextCost は前後のページを取得したときの最大額（PageSize 人分）。課金は返った人数ぶんなので、
+	// 実費はこれ以下になる。
+	NextCost float64
+	// LookupCost は再見積り（ユーザー検索 1 回）の金額。UnitCost と今は同額だが、料金表では別の行
+	// （xapi.CostPerUserRead と CostPerFollowsRead）なので流用しない。
+	LookupCost    float64
+	PagingBlocked bool
+	PagingReason  string
+	// FormURL は「別のアカウントを調べる」。EstimateURL は「このアカウントを再見積り」で、
+	// ユーザー名が無いとき（ID だけで開いたページ）は空にしてリンクを出さない（見積りはユーザー名で引くため）。
+	FormURL        string
+	EstimateURL    string
+	RateLimitReset string
+	// CSV は表示中のフォロワーの CSV。テンプレートがデータブロックに埋め、ブラウザが保存する
+	// （追加の API 呼び出しもサーバ側の保存も無い）。
+	CSV view.CSVExport
+}
+
+// PageID は結果ページと同じ 2 カラムの CSS を当てる（ResultsPage.PageID と同じ値）。
+func (FollowersPage) PageID() string { return "results" }
+
 // ---------------------------------------------------------------------------
 // フォームと URL の相互変換（全状態を URL に載せる・D-23）
 // ---------------------------------------------------------------------------
@@ -173,11 +211,10 @@ func followersPageSizeOptions() []MaxOption {
 // ハンドラ
 // ---------------------------------------------------------------------------
 
-// handleFollowers はフォロワー取得の画面（GET /followers）。mode=estimate で見積り（ユーザー検索）を行い、
-// それ以外はフォームを出す（API は呼ばない＝課金なし）。
+// handleFollowers はフォロワー取得の画面（GET /followers）。mode=estimate で見積り（ユーザー検索）、
+// mode=execute でフォロワー一覧の 1 ページの取得を行い、それ以外はフォームを出す（API は呼ばない＝課金なし）。
 //
-// 取得（mode=execute・フォロワー一覧）はまだ無く、フォームを出す（見積り画面の取得のリンクも、
-// いまはフォームに戻る）。
+// どちらのモードも「入力の検証 → トークンの確認 → パラメータの組み立て → 実行」の順に進む。
 func (a *App) handleFollowers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := parseFollowersForm(q)
@@ -208,6 +245,34 @@ func (a *App) handleFollowers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.handleFollowersEstimate(w, r, f, params)
+	case "execute":
+		// 順序と止め方は見積りと同じ（入力の誤り → 400 のフォーム、トークン未設定 → 案内。どちらも課金なし）。
+		// 取得のリンクは見積り画面と一覧が作るが、URL は書き換えられるので同じように確かめる。
+		if errs := query.ValidateFollowersFetch(f); len(errs) > 0 {
+			a.log.Info("validation failed（API は呼び出していません）", "errors", len(errs), "mode", mode, "path", followersPath)
+			a.renderFollowersForm(w, r, f, query.ValidationErrors(errs).Messages(), http.StatusBadRequest)
+			return
+		}
+		// ここから先（見出し・リンク・CSV のファイル名・戻り先）は @ を落としたユーザー名を使う。
+		// そのまま使うと「@@name」と出るうえ、@ 付きの値が前後のページのリンクに引き継がれる。
+		// 形式は上の検証（U02）で確かめてある。@ だけなら空になり、ユーザー名が無いものとして扱う。
+		f.Username = query.NormalizeFollowersUsername(f.Username)
+		if !a.tokenReady() {
+			a.log.Info("トークン未設定のため実行しませんでした（API は呼び出していません）", "mode", mode, "path", followersPath)
+			a.renderTokenMissing(w, r, "フォロワーを取得する", followersFormURL(f))
+			return
+		}
+		params, err := query.BuildFollowersParams(f)
+		if err != nil {
+			// 上の検証と同じ規則なので通常は来ない。来ても API は呼ばずにフォームへ戻す（課金なし）。
+			msgs := []string{err.Error()}
+			if verrs, ok := err.(query.ValidationErrors); ok {
+				msgs = verrs.Messages()
+			}
+			a.renderFollowersForm(w, r, f, msgs, http.StatusBadRequest)
+			return
+		}
+		a.handleFollowersExecute(w, r, f, params)
 	default:
 		a.renderFollowersForm(w, r, f, nil, http.StatusOK)
 	}
@@ -287,6 +352,99 @@ func (a *App) handleFollowersEstimate(w http.ResponseWriter, r *http.Request, f 
 // この関数の外から UserByUsername を呼んではならない。
 func (a *App) lookupUser(ctx context.Context, p xapi.UserLookupParams) (*xapi.UserLookupResponse, *xapi.RateLimit, error) {
 	return a.client.UserByUsername(ctx, p)
+}
+
+// handleFollowersExecute はフォロワー一覧を 1 ページ取得し、ユーザーカードを結果ページと同じ 2 カラムに並べる。
+// f は入力（検証済み・ユーザー名は @ を落とした値）、params は f から組み立てたフォロワー取得のパラメータ。
+func (a *App) handleFollowersExecute(w http.ResponseWriter, r *http.Request, f query.FollowersForm, params xapi.FollowersParams) {
+	ctx := r.Context()
+	cap := a.capStatus(ctx)
+
+	// フォロワー取得は投稿を返さないので月次 cap（post read の上限）では止めない（いまは常に許可）。
+	// 方針が変わってゲートが閉じたら、検索の handleExecute と同じく API を呼ぶ前に 403 で止める。
+	allowed, reason := cost.GateAllowsFor(cost.ReadUsers, cap, a.cfg)
+	if !allowed {
+		a.log.Warn("実行をゲートで停止しました", "reason", reason, "path", followersPath)
+		a.renderErrorTo(w, r, http.StatusForbidden, "実行できません", reason,
+			[]string{"API は呼び出していません（課金なし）。停止の理由を確かめてから、見積りからやり直してください。"},
+			followersFormURL(f))
+		return
+	}
+
+	resp, rl, err := a.fetchFollowers(ctx, params)
+	if err != nil {
+		a.renderFollowersAPIError(w, r, err, f)
+		return
+	}
+	if len(resp.Data) == 0 && len(resp.Errors) > 0 {
+		// 読めないアカウント（鍵アカウントなど）は HTTP 200 で data が無く errors だけが返る（エラーにはならない）。
+		// ユーザーが返っていないので課金されない見込みで、セッション累計にも計上しない。
+		// errors も無い 0 人（フォロワーがいない）は下の通常の画面で「0 人でした」と出す。
+		a.log.Info("フォロワー取得でユーザーが返りませんでした（課金なしの見込み）", "problems", len(resp.Errors))
+		message, steps := followersProblemText(resp.Errors)
+		a.renderUserProblems(w, r, "フォロワーを取得できませんでした", message, steps, resp.Errors, followersFormURL(f))
+		return
+	}
+
+	// Following/Followers: Read は返ったユーザーの人数ぶんかかる（max_results の人数ではない）。
+	// 0 人でも回数には数える（検索の handleExecute と同じ。API を 1 回呼んだことに変わりはない）。
+	// フィクスチャモードは API を呼ばないので計上しない。
+	spent := cost.FollowersCostFor(len(resp.Data))
+	if !a.client.FixtureMode() {
+		a.session.Add(spent)
+	}
+
+	result := view.BuildFollowersView(resp, view.ViewOptions{
+		Now:         a.now(),
+		Loc:         a.loc,
+		RateLimit:   rl,
+		SpentUSD:    spent,
+		FixtureMode: a.cfg.FixtureMode(),
+		Log:         a.log,
+	})
+
+	p := FollowersPage{
+		// ヘッダのセッション累計に今回の分が入るよう、計上の後で作る。
+		Page:           a.page("フォロワー一覧", cap, xapi.EndpointRecent),
+		Result:         result,
+		TargetUsername: f.Username,
+		TargetID:       f.UserID,
+		PageSize:       params.MaxResults,
+		UnitCost:       cost.FollowersCostFor(1),
+		NextCost:       cost.FollowersCostFor(params.MaxResults),
+		LookupCost:     cost.UserLookupCost(),
+		// 前後のページの取得も同じゲートを通る。ここまで来たなら開いているが、閉じたときの表示
+		// （無効なボタンと理由）はテンプレートが持つので、判定の結果をそのまま渡す（検索と同じ）。
+		PagingBlocked: !allowed,
+		PagingReason:  reason,
+		// 別のアカウントを調べるので、ユーザー名は空にして 1 ページの人数だけを保つ。
+		// 同じアカウントのやり直しは EstimateURL（再見積り）が受け持つ。
+		FormURL:        followersFormURL(query.FollowersForm{MaxResults: f.MaxResults}),
+		RateLimitReset: rl.ResetDisplay(a.loc),
+		CSV: view.CSVExport{
+			// ファイル名の日時は表示タイムゾーンで書く（画面の時刻表示と揃える）。
+			Filename: view.FollowersCSVFilename(f.Username, f.UserID, a.now().In(a.loc)),
+			Text:     view.FollowersCSVFile(result.Users),
+		},
+	}
+	if f.Username != "" {
+		// 見積り画面の ReestimateURL と同じ形（ID は載せない。見積りはユーザー名から引き直す）。
+		p.EstimateURL = followersURL(query.FollowersForm{Username: f.Username, MaxResults: f.MaxResults}, "estimate", "")
+	}
+	if result.NextToken != "" {
+		p.NextURL = followersURL(f, "execute", result.NextToken)
+	}
+	if result.PrevToken != "" {
+		p.PrevURL = followersURL(f, "execute", result.PrevToken)
+	}
+
+	a.render(w, http.StatusOK, "followers.html", p)
+}
+
+// fetchFollowers は Following/Followers: Read の課金が発生する唯一の呼び出し箇所（executeSearch と同じ扱い）。
+// この関数の外から Followers を呼んではならない。
+func (a *App) fetchFollowers(ctx context.Context, p xapi.FollowersParams) (*xapi.FollowersResponse, *xapi.RateLimit, error) {
+	return a.client.Followers(ctx, p)
 }
 
 // renderFollowersForm はフォロワー取得のフォームを描画する。errs は入力の誤り（API は呼んでいない）。
@@ -449,6 +607,29 @@ func (a *App) renderUserProblems(w http.ResponseWriter, r *http.Request, heading
 		FormURL:  backURL,
 	}
 	a.render(w, problemStatus(probs), "error.html", p)
+}
+
+// followersProblemText は、フォロワー取得で data が無く errors だけが返ったときの本文と対処手順を返す。
+// 分類には画面のステータスを決める problemStatus をそのまま使い、ステータスと本文が食い違わないようにする。
+func followersProblemText(probs []xapi.ProblemDetail) (message string, steps []string) {
+	const noCharge = "ユーザーが返っていないため、課金されない見込みです。"
+	switch problemStatus(probs) {
+	case http.StatusForbidden:
+		// 鍵アカウントのフォロワーを App-only の Bearer Token で読んだときに返る想定（未実測）。
+		return "X API がこのアカウントのフォロワーを読む権限が無いと返しました。鍵アカウントのフォロワーは、" +
+				"App-only の Bearer Token では取得できない見込みです。" + noCharge,
+			followersErrorSteps(xapi.KindForbidden)
+	case http.StatusNotFound:
+		return "X API が対象のアカウントを見つけられませんでした。アカウントが凍結・削除されたか、" +
+				"URL のユーザー ID が誤っている可能性があります。" + noCharge,
+			followersErrorSteps(xapi.KindNotFound)
+	default:
+		return "X API がフォロワーを返さず、エラーだけを返しました（HTTP 200）。" + noCharge,
+			[]string{
+				"技術的な詳細で、X API が返したエラーの内容を確認してください。",
+				"時間をおいて、見積りからやり直してください。",
+			}
+	}
 }
 
 // problemStatus は data が無く errors だけが返ったときの、この画面のステータスを決める。

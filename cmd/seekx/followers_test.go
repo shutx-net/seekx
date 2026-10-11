@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -64,7 +67,8 @@ func estimateTarget(username, max string) string {
 	return followersPath + "?" + url.Values{"username": {username}, "max": {max}, "mode": {"estimate"}}.Encode()
 }
 
-// lookupServer はユーザー検索（/users/by/username/）に status・header・body で答える偽の X API。
+// lookupServer は /users/ 配下（ユーザー検索の /users/by/username/ とフォロワー取得の /users/{id}/followers）に
+// status・header・body で答える偽の X API。
 // /users/ 配下に届いたリクエストの URL を *got に記録する（課金経路への到達とリクエストの形を確かめる）。
 // /usage/tweets にはヘッダの cap 表示のための値を返す（usageOnlyServer と同じ）。
 func lookupServer(t *testing.T, status int, header http.Header, body string, got *[]*url.URL) *httptest.Server {
@@ -1233,4 +1237,521 @@ func TestUserCardMarkup(t *testing.T) {
 			}
 		}
 	})
+}
+
+// executeTarget はフォロワー一覧の取得（mode=execute）の URL を作る。空の値は載せない（token が空なら最初のページ）。
+func executeTarget(id, username, max, token string) string {
+	v := url.Values{"mode": {"execute"}}
+	for key, val := range map[string]string{"id": id, "username": username, "max": max, "token": token} {
+		if val != "" {
+			v.Set(key, val)
+		}
+	}
+	return followersPath + "?" + v.Encode()
+}
+
+// linkTo は本文から、表示が label で始まる <a> の href を探し、HTML の実体参照を戻して返す
+// （画面のリンクを、利用者がクリックしたときと同じ URL でたどるため）。
+func linkTo(t *testing.T, body, label string) string {
+	t.Helper()
+	m := regexp.MustCompile(`<a [^>]*href="([^"]*)"[^>]*>` + regexp.QuoteMeta(label)).FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("「%s」のリンクが無い:\n%s", label, truncate(body, 400))
+	}
+	return html.UnescapeString(m[1])
+}
+
+// csvFilenameOf は本文の CSV のデータブロックから、保存するファイル名を取り出す。
+func csvFilenameOf(t *testing.T, body string) string {
+	t.Helper()
+	var data view.CSVExport
+	if err := json.Unmarshal([]byte(csvDataBlock(t, body)), &data); err != nil {
+		t.Fatalf("CSV のデータブロックを JSON として読めない: %v", err)
+	}
+	return data.Filename
+}
+
+// TestFollowersExecuteFixture はフィクスチャモードのフォロワー一覧（mode=execute）を状態ごとに確認する。
+// どの状態でも API は呼ばれないので、セッション累計は 0 のまま。
+func TestFollowersExecuteFixture(t *testing.T) {
+	// open は target を開き、ステータスが want であることを確かめて本文を返す。
+	open := func(t *testing.T, router http.Handler, target string, want int) string {
+		t.Helper()
+		rec := serveGet(t, router, target)
+		if rec.Code != want {
+			t.Fatalf("GET %s は %d を返すべき: status=%d\n%s", target, want, rec.Code, truncate(rec.Body.String(), 400))
+		}
+		return rec.Body.String()
+	}
+
+	t.Run("見積りの取得のリンクから 3 ページを前後にたどれる", func(t *testing.T) {
+		app := testApp(t, config.Config{FixtureDir: fixtureDir})
+		router := newRouter(app)
+
+		// 見積り画面の取得のリンク（API が返したユーザー名と ID で作られる）から最初のページを開く。
+		first := linkTo(t, open(t, router, estimateTarget("@Anyone", "100"), http.StatusOK), "最初の 100 人を取得する")
+		if want := executeTarget("20000001", "sample_star", "100", ""); first != want {
+			t.Fatalf("見積り画面の取得のリンク: got %q, want %q", first, want)
+		}
+
+		page1 := withoutCSVData(open(t, router, first, http.StatusOK))
+		if n := len(userCards(page1)); n != 6 {
+			t.Errorf("1 ページ目のカードは 6 枚であるべき: got %d", n)
+		}
+		for _, want := range []string{
+			"<h1>@sample_star のフォロワー</h1>",
+			// 次のページの金額は 1 ページの人数（100 人）ぶんの最大額。リンクは API が返した next_token を載せる。
+			`<a class="btn" href="/followers?id=20000001&amp;max=100&amp;mode=execute&amp;token=FIXTUREPAGE2ZZZZ&amp;username=sample_star">次の 100 人を取得（+$1.00）</a>`,
+			"対象: @sample_star・ユーザー ID 20000001",
+			`表示中 <span class="strong">6 人</span>（1 ページ 100 人）`,
+			// 今回の金額は返った人数（6 人）ぶん。1 ページの人数（100 人）ではない。
+			`今回の推定コスト: <span class="strong">$0.060</span>（6 人 × $0.010）`,
+			// 別のアカウントはユーザー名を空にしたフォームで、同じアカウントのやり直しは再見積りで。
+			`<a class="btn secondary" href="/followers?max=100">別のアカウントを調べる</a>`,
+			`<a class="btn secondary" href="/followers?max=100&amp;mode=estimate&amp;username=sample_star">このアカウントを再見積り（+$0.010）</a>`,
+		} {
+			if !strings.Contains(page1, want) {
+				t.Errorf("1 ページ目に %q が含まれていない", want)
+			}
+		}
+		// 最初のページに前のページは無い。部分エラーも無い（3 ページ目の対照）。
+		for _, bad := range []string{"前の 100 人", "部分成功", "ZgotmplZ"} {
+			if strings.Contains(page1, bad) {
+				t.Errorf("1 ページ目に %q を出してはいけない", bad)
+			}
+		}
+
+		page2 := withoutCSVData(open(t, router, linkTo(t, page1, "次の 100 人を取得"), http.StatusOK))
+		cards2 := userCards(page2)
+		if len(cards2) != 5 || !strings.Contains(cards2[0], "@sample_fan07") {
+			t.Fatalf("2 ページ目（5 人・先頭は sample_fan07）が出ていない: %d 枚", len(cards2))
+		}
+		if !strings.Contains(page2, `<a class="btn" href="/followers?id=20000001&amp;max=100&amp;mode=execute&amp;token=FIXTUREPAGE3ZZZZ&amp;username=sample_star">次の 100 人を取得（+$1.00）</a>`) {
+			t.Error("2 ページ目の次のリンクは FIXTUREPAGE3ZZZZ を載せるべき")
+		}
+
+		page3 := withoutCSVData(open(t, router, linkTo(t, page2, "次の 100 人を取得"), http.StatusOK))
+		if n := len(userCards(page3)); n != 2 {
+			t.Errorf("3 ページ目のカードは 2 枚であるべき: got %d", n)
+		}
+		for _, want := range []string{
+			// 前のページも取り直しになり課金されるので、金額を出す。
+			`<a class="btn secondary" href="/followers?id=20000001&amp;max=100&amp;mode=execute&amp;token=FIXTUREPAGE2ZZZZ&amp;username=sample_star">前の 100 人を取得（+$1.00）</a>`,
+			"一部のデータを取得できませんでした（HTTP 200 の部分成功）",
+			"Could not find user with id: [30000999].",
+			`今回の推定コスト: <span class="strong">$0.020</span>（2 人 × $0.010）`,
+		} {
+			if !strings.Contains(page3, want) {
+				t.Errorf("3 ページ目に %q が含まれていない", want)
+			}
+		}
+		if strings.Contains(page3, "次の 100 人") {
+			t.Error("最後のページ（next_token なし）に次のリンクを出してはいけない")
+		}
+
+		// 前のリンクで 2 ページ目に戻れる。
+		back := userCards(withoutCSVData(open(t, router, linkTo(t, page3, "前の 100 人を取得"), http.StatusOK)))
+		if len(back) != 5 || !strings.Contains(back[0], "@sample_fan07") {
+			t.Errorf("前のリンクは 2 ページ目（5 人・先頭は sample_fan07）に戻るべき: %d 枚", len(back))
+		}
+		assertNoCharge(t, app, "フィクスチャモード")
+	})
+
+	t.Run("鍵アカウント（errors だけの 200）は 403 で取得できなかったことを伝える", func(t *testing.T) {
+		app := testApp(t, config.Config{FixtureDir: fixtureDir})
+		body := open(t, newRouter(app), executeTarget("20000002", "fx_protected", "100", ""), http.StatusForbidden)
+		for _, want := range []string{
+			"<h1>フォロワーを取得できませんでした</h1>",
+			"鍵アカウントのフォロワーは、App-only の Bearer Token では取得できない見込みです。",
+			"課金されない見込みです",
+			"<h2>対処手順</h2>",
+			// X API としては成功（HTTP 200 で errors だけ）の応答であることと、errors の説明。
+			"HTTP ステータス: 200",
+			"Sorry, you are not authorized to see the user with id: [20000002].",
+			`href="/followers?max=100&amp;username=fx_protected">フォームに戻る</a>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("鍵アカウントの画面に %q が含まれていない", want)
+			}
+		}
+		for _, bad := range []string{`id="user-list"`, "csv-data", "mode=execute", "ZgotmplZ"} {
+			if strings.Contains(body, bad) {
+				t.Errorf("鍵アカウントの画面に %q を出してはいけない", bad)
+			}
+		}
+		// 手順は権限が無いとき向け（followersErrorSteps(KindForbidden)）。本文にも鍵の説明があるので、
+		// 手順の欄だけを切り出して確かめる。
+		steps := between(t, body, "<h2>対処手順</h2>", "</ol>")
+		for _, s := range followersErrorSteps(xapi.KindForbidden) {
+			if !strings.Contains(steps, "<li>"+s+"</li>") {
+				t.Errorf("鍵アカウントの手順に %q が無い", s)
+			}
+		}
+		// 対照: 見つからないとき向けの手順（ユーザー名の綴り）を出してはいけない。
+		if strings.Contains(steps, "ユーザー名の綴り") {
+			t.Error("鍵アカウントの画面に、見つからないとき向けの手順を出してはいけない")
+		}
+		assertNoCharge(t, app, "フィクスチャモード")
+	})
+
+	t.Run("フォロワー 0 人は 0 人と出し、ページングのリンクを出さない", func(t *testing.T) {
+		app := testApp(t, config.Config{FixtureDir: fixtureDir})
+		body := open(t, newRouter(app), executeTarget("20000003", "fx_empty", "100", ""), http.StatusOK)
+		for _, want := range []string{"<h1>@fx_empty のフォロワー</h1>", "フォロワーは 0 人でした。", "課金は発生していません"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("0 人の画面に %q が含まれていない", want)
+			}
+		}
+		for _, bad := range []string{"人を取得（+", `<article class="user-card">`} {
+			if strings.Contains(body, bad) {
+				t.Errorf("0 人の画面に %q を出してはいけない", bad)
+			}
+		}
+		assertNoCharge(t, app, "フィクスチャモード")
+	})
+
+	t.Run("ユーザー名が無ければ ID を見出しとファイル名に使い、再見積りを出さない", func(t *testing.T) {
+		app := testApp(t, config.Config{FixtureDir: fixtureDir})
+		raw := open(t, newRouter(app), executeTarget("20000001", "", "100", ""), http.StatusOK)
+		body := withoutCSVData(raw)
+		for _, want := range []string{
+			"<h1>ユーザー ID 20000001 のフォロワー</h1>",
+			"<li>対象: ユーザー ID 20000001</li>",
+			// 前後のページのリンクにもユーザー名を足さない（URL に無い値を作らない）。
+			`<a class="btn" href="/followers?id=20000001&amp;max=100&amp;mode=execute&amp;token=FIXTUREPAGE2ZZZZ">次の 100 人を取得（+$1.00）</a>`,
+			`<a class="btn secondary" href="/followers?max=100">別のアカウントを調べる</a>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("ユーザー名の無いページに %q が含まれていない", want)
+			}
+		}
+		// 見積りはユーザー名で引くので、ユーザー名が無ければ再見積りのリンクは作れない。
+		if strings.Contains(body, "再見積り") || strings.Contains(body, "mode=estimate") {
+			t.Error("ユーザー名が無いのに再見積りのリンクを出してはいけない")
+		}
+		if got, want := csvFilenameOf(t, raw), "followers_20000001_20260813-090000.csv"; got != want {
+			t.Errorf("CSV のファイル名はユーザー名が無ければ ID を使うべき: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("URL のユーザー名は先頭の @ を落として見出し・リンク・ファイル名に使う", func(t *testing.T) {
+		app := testApp(t, config.Config{FixtureDir: fixtureDir})
+		router := newRouter(app)
+		for _, input := range []string{"@sample_star", "＠sample_star", " @sample_star "} {
+			raw := open(t, router, executeTarget("20000001", input, "100", ""), http.StatusOK)
+			body := withoutCSVData(raw)
+			for _, want := range []string{
+				"<h1>@sample_star のフォロワー</h1>",
+				"対象: @sample_star・ユーザー ID 20000001",
+				`token=FIXTUREPAGE2ZZZZ&amp;username=sample_star">次の 100 人を取得`,
+				`href="/followers?max=100&amp;mode=estimate&amp;username=sample_star">このアカウントを再見積り`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("入力 %q: %q が含まれていない（@ を落とした値を使うべき）", input, want)
+				}
+			}
+			for _, bad := range []string{"@@", "@＠", "username=%40", "username=%EF%BC%A0"} {
+				if strings.Contains(body, bad) {
+					t.Errorf("入力 %q: %q を出してはいけない（@ 付きの値を見出しやリンクに引き継いでいる）", input, bad)
+				}
+			}
+			if got, want := csvFilenameOf(t, raw), "followers_sample_star_20260813-090000.csv"; got != want {
+				t.Errorf("入力 %q: CSV のファイル名: got %q, want %q", input, got, want)
+			}
+		}
+
+		// @ だけならユーザー名が無いものとして扱う（見出しは ID で出す）。
+		body := withoutCSVData(open(t, router, executeTarget("20000001", "@", "100", ""), http.StatusOK))
+		if !strings.Contains(body, "<h1>ユーザー ID 20000001 のフォロワー</h1>") {
+			t.Error("@ だけのユーザー名は無いものとして扱い、見出しを ID で出すべき")
+		}
+
+		// 対照: 落とすのは先頭の 1 つだけ。@ が 2 つなら入力の誤り（U02）で、API は呼ばない。
+		rec := serveGet(t, router, executeTarget("20000001", "@@sample_star", "100", ""))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "[U02]") {
+			t.Errorf("@ が 2 つのユーザー名は 400 [U02] で弾くべき: status=%d", rec.Code)
+		}
+		assertNoCharge(t, app, "フィクスチャモード")
+	})
+
+	t.Run("1 ページの人数をページングのラベルと金額に使う", func(t *testing.T) {
+		app := testApp(t, config.Config{FixtureDir: fixtureDir})
+		body := withoutCSVData(open(t, newRouter(app), executeTarget("20000001", "sample_star", "1000", ""), http.StatusOK))
+		for _, want := range []string{
+			`表示中 <span class="strong">6 人</span>（1 ページ 1,000 人）`,
+			// 1,000 人 × $0.010。既定の 100 人で計算してはいけない。
+			`href="/followers?id=20000001&amp;max=1000&amp;mode=execute&amp;token=FIXTUREPAGE2ZZZZ&amp;username=sample_star">次の 1,000 人を取得（+$10.00）</a>`,
+			`href="/followers?max=1000&amp;mode=estimate&amp;username=sample_star">このアカウントを再見積り（+$0.010）</a>`,
+			`href="/followers?max=1000">別のアカウントを調べる</a>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("指定した 1 ページの人数（1,000）を使うべき: %q が無い", want)
+			}
+		}
+	})
+}
+
+// TestFollowersFetchValidation は、取得（mode=execute）の入力の誤りを API を呼ばずに 400 のフォームで
+// 知らせることを確認する。取得のリンクは見積り画面と一覧が作るが、URL は書き換えられる。
+func TestFollowersFetchValidation(t *testing.T) {
+	cases := []struct {
+		name                     string
+		id, username, max, token string
+		rule                     string
+	}{
+		{"ユーザー ID が無い", "", "sample", "100", "", "[U03]"},
+		{"ユーザー ID が数字でない", "abc", "sample", "100", "", "[U03]"},
+		{"ユーザー ID が 20 桁", "12345678901234567890", "sample", "100", "", "[U03]"},
+		{"ページングトークンが短い", "20000001", "sample", "100", "ABC", "[U05]"},
+		{"ページングトークンにパスを壊す文字", "20000001", "sample", "100", "../../FIXTUREPAGE2ZZZZ", "[U05]"},
+		{"人数が API の上限を超える", "20000001", "sample", "1001", "", "[U04]"},
+		{"人数が 0", "20000001", "sample", "0", "", "[U04]"},
+		{"人数が読めない", "20000001", "sample", "abc", "", "[U04]"},
+		{"ユーザー名の形式", "20000001", "a-b", "100", "", "[U02]"},
+		{"@ が 2 つ", "20000001", "@@sample", "100", "", "[U02]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			users := 0
+			srv := usageOnlyServer(t, &users)
+			app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
+			rec := serveGet(t, newRouter(app), executeTarget(tc.id, tc.username, tc.max, tc.token))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("入力の誤りは 400 を返すべき: status=%d", rec.Code)
+			}
+			body := rec.Body.String()
+			for _, want := range []string{tc.rule, "取得できません（API は呼び出していません）", `<form action="/followers" method="get">`} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%q が含まれていない:\n%s", want, truncate(body, 400))
+				}
+			}
+			if users != 0 {
+				t.Errorf("入力の誤りでフォロワー取得（課金経路）を呼んではいけない: calls=%d", users)
+			}
+			assertNoCharge(t, app, "入力の誤り")
+		})
+	}
+
+	t.Run("対照: 正しい入力ならフォロワー取得に 1 回届く", func(t *testing.T) {
+		users := 0
+		srv := usageOnlyServer(t, &users) // /users/ には 404 を返す
+		app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
+		rec := serveGet(t, newRouter(app), executeTarget("20000001", "sample", "100", "FIXTUREPAGE2ZZZZ"))
+		if users != 1 {
+			t.Errorf("正しい入力ならフォロワー取得はちょうど 1 回呼ばれるべき: calls=%d", users)
+		}
+		if rec.Code == http.StatusBadRequest {
+			t.Error("正しい入力を 400 で弾いてはいけない")
+		}
+	})
+}
+
+// TestFollowersFetchWithoutToken は、トークン未設定のまま取得しようとしたときに API を呼ばずに案内を出すことを確認する。
+func TestFollowersFetchWithoutToken(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	app := testApp(t, config.Config{APIBaseURL: srv.URL}) // BearerToken 空
+	router := newRouter(app)
+
+	rec := serveGet(t, router, executeTarget("20000001", "@sample", "100", ""))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("トークン未設定なら 403 で止めるべき: status=%d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"<h1>Bearer Token が設定されていません</h1>",
+		"フォロワーを取得するには X API の Bearer Token が必要です。API はまだ呼び出していません（課金なし）。",
+		// 戻り先はフォロワー取得のフォーム。ID は落とし、ユーザー名は @ を落とした値にする。
+		`href="/followers?max=100&amp;username=sample">フォームに戻る</a>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("トークン未設定の案内に %q が含まれていない", want)
+		}
+	}
+
+	t.Run("入力の誤りはトークンの有無より先に知らせる", func(t *testing.T) {
+		rec := serveGet(t, router, executeTarget("abc", "sample", "100", ""))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "[U03]") {
+			t.Errorf("入力の誤りは 400 で知らせるべき（トークンを設定しても直らない）: status=%d", rec.Code)
+		}
+	})
+
+	if calls != 0 {
+		t.Errorf("トークン未設定で API を呼んではいけない（usage 含む）: calls=%d", calls)
+	}
+	assertNoCharge(t, app, "トークン未設定")
+}
+
+// TestFollowersFetchBilling は、フォロワー取得の金額を返った人数ぶんだけ計上することを確認する。
+// 0 人は金額 0 で回数だけ数え（検索と同じ）、errors だけの応答と 429 は課金されないので計上しない。
+func TestFollowersFetchBilling(t *testing.T) {
+	future := strconv.FormatInt(time.Now().Add(10*time.Minute).Unix(), 10)
+	const threeUsers = `{"data":[` +
+		`{"id":"30000001","name":"a","username":"fan_a"},` +
+		`{"id":"30000002","name":"b","username":"fan_b"},` +
+		`{"id":"30000003","name":"c","username":"fan_c"}],"meta":{"result_count":3}}`
+	cases := []struct {
+		name       string
+		status     int
+		header     http.Header
+		body       string
+		wantStatus int
+		wantUSD    float64
+		wantCalls  int
+		want       []string // 画面に出るべきもの
+	}{
+		{"3 人が返れば 3 人分を計上する", http.StatusOK, nil, threeUsers,
+			http.StatusOK, cost.FollowersCostFor(3), 1,
+			[]string{
+				`今回の推定コスト: <span class="strong">$0.030</span>（3 人 × $0.010）`,
+				// ヘッダのセッション累計にも今回の分が入っている（計上の後で画面を作る）。
+				"セッション $0.030 / 1 回",
+			}},
+		{"0 人なら金額 0 で回数だけ数える", http.StatusOK, nil, `{"meta":{"result_count":0}}`,
+			http.StatusOK, 0, 1,
+			[]string{"フォロワーは 0 人でした。", "セッション $0.000 / 1 回"}},
+		{"errors だけ（鍵アカウント）は計上しない", http.StatusOK, nil,
+			`{"errors":[{"value":"20000001","detail":"Sorry, you are not authorized to see the user with id: [20000001].","title":"Authorization Error","resource_type":"user","parameter":"id","resource_id":"20000001","type":"https://api.twitter.com/2/problems/not-authorized-for-resource"}]}`,
+			http.StatusForbidden, 0, 0,
+			[]string{"フォロワーを取得できませんでした", "課金されない見込みです", "セッション $0.000 / 0 回"}},
+		{"429 は計上しない", http.StatusTooManyRequests,
+			http.Header{"X-Rate-Limit-Limit": {"300"}, "X-Rate-Limit-Remaining": {"0"}, "X-Rate-Limit-Reset": {future}},
+			`{"title":"Too Many Requests","status":429,"errors":[{"code":88,"message":"Rate limit exceeded"}]}`,
+			http.StatusTooManyRequests, 0, 0,
+			[]string{"（HTTP 429・課金なし）", `href="/followers?max=100&amp;username=sample">フォームに戻る</a>`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []*url.URL
+			srv := lookupServer(t, tc.status, tc.header, tc.body, &got)
+			app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
+			rec := serveGet(t, newRouter(app), executeTarget("20000001", "sample", "100", ""))
+			if rec.Code != tc.wantStatus {
+				t.Errorf("status: got %d, want %d", rec.Code, tc.wantStatus)
+			}
+			if len(got) == 0 {
+				t.Fatal("フォロワー取得が呼ばれていない（計上の検査が成り立たない）")
+			}
+			if usd := app.session.Total(); usd != tc.wantUSD {
+				t.Errorf("セッション累計: got $%v, want $%v", usd, tc.wantUSD)
+			}
+			if n := app.session.CallCount(); n != tc.wantCalls {
+				t.Errorf("課金の回数: got %d, want %d", n, tc.wantCalls)
+			}
+			body := rec.Body.String()
+			for _, want := range tc.want {
+				if !strings.Contains(body, want) {
+					t.Errorf("画面に %q が含まれていない:\n%s", want, truncate(body, 600))
+				}
+			}
+		})
+	}
+}
+
+// TestFollowersFetchRequest はフォロワー取得のリクエストの形を確認する。
+func TestFollowersFetchRequest(t *testing.T) {
+	const body = `{"data":[{"id":"30000001","name":"n","username":"fan"}],"meta":{"result_count":1}}`
+
+	t.Run("ID をパスに、人数とページングトークンをクエリに載せ、expansions を送らない", func(t *testing.T) {
+		var got []*url.URL
+		srv := lookupServer(t, http.StatusOK, nil, body, &got)
+		app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
+		rec := serveGet(t, newRouter(app), executeTarget("20000001", "sample", "500", "ABCDEFGHIJKLMNOP"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("取得は 200 を返すべき: status=%d\n%s", rec.Code, truncate(rec.Body.String(), 400))
+		}
+		if len(got) != 1 {
+			t.Fatalf("フォロワー取得はちょうど 1 回呼ばれるべき: got %d", len(got))
+		}
+		if got[0].Path != "/users/20000001/followers" {
+			t.Errorf("path: got %q, want %q", got[0].Path, "/users/20000001/followers")
+		}
+		q := got[0].Query()
+		for key, want := range map[string]string{
+			"max_results":      "500",
+			"pagination_token": "ABCDEFGHIJKLMNOP",
+			"user.fields":      strings.Join(xapi.UserProfileFieldsRequested, ","),
+		} {
+			if q.Get(key) != want {
+				t.Errorf("%s: got %q, want %q", key, q.Get(key), want)
+			}
+		}
+		// 【expansions を送ってはいけない】ピン留め投稿などが includes に入ると post read として課金され得る。
+		if q.Has("expansions") {
+			t.Errorf("expansions を送ってはいけない: %q", q.Get("expansions"))
+		}
+		// ユーザー名は見出しとリンクにだけ使い、API には送らない（取得は ID で行う）。
+		if q.Has("username") || strings.Contains(got[0].Path, "sample") {
+			t.Errorf("ユーザー名を API に送ってはいけない: %s", got[0])
+		}
+	})
+
+	t.Run("最初のページにはページングトークンを送らない", func(t *testing.T) {
+		var got []*url.URL
+		srv := lookupServer(t, http.StatusOK, nil, body, &got)
+		app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
+		serveGet(t, newRouter(app), executeTarget("20000001", "sample", "100", ""))
+		if len(got) != 1 {
+			t.Fatalf("フォロワー取得はちょうど 1 回呼ばれるべき: got %d", len(got))
+		}
+		q := got[0].Query()
+		if q.Has("pagination_token") {
+			t.Errorf("最初のページに pagination_token を送ってはいけない: %q", q.Get("pagination_token"))
+		}
+		// 対照: 人数は送る。
+		if q.Get("max_results") != "100" {
+			t.Errorf("max_results: got %q, want %q", q.Get("max_results"), "100")
+		}
+	})
+}
+
+// TestFollowersFetchIgnoresPostCap は、月次 cap（post read の上限）が Block でもフォロワー取得を止めないことを
+// 確認する（GateAllowsFor に ReadUsers を渡している）。対照として、同じ cap で投稿の検索が止まることも固定する
+// （cap がこのテストで効いている証拠）。
+func TestFollowersFetchIgnoresPostCap(t *testing.T) {
+	users, searches := 0, 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/usage/tweets"):
+			// 96% 消費。cap Block の閾値（95%）を超える。
+			_, _ = w.Write([]byte(`{"data":{"project_id":"1","project_cap":"2000000","project_usage":1920000,"cap_reset_day":12}}`))
+		case strings.HasPrefix(r.URL.Path, "/users/"):
+			users++
+			_, _ = w.Write([]byte(`{"data":[{"id":"30000001","name":"n","username":"fan"}],"meta":{"result_count":1,"next_token":"NEXTPAGETOKEN0001"}}`))
+		case strings.HasPrefix(r.URL.Path, "/tweets/search/"):
+			searches++
+			_, _ = w.Write([]byte(`{"data":[],"meta":{"result_count":0}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
+	router := newRouter(app)
+
+	rec := serveGet(t, router, executeTarget("20000001", "sample", "100", ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cap 超過でもフォロワー取得は 200 を返すべき: status=%d\n%s", rec.Code, truncate(rec.Body.String(), 400))
+	}
+	if users != 1 {
+		t.Errorf("cap 超過でもフォロワー取得はちょうど 1 回呼ばれるべき: calls=%d", users)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "banner-block") {
+		t.Fatal("cap 超過のバナーが出ていない（cap が Block になっておらず、検査が成り立たない）")
+	}
+	// 次のページも止めない（無効なボタンにしない）。
+	if !strings.Contains(body, `token=NEXTPAGETOKEN0001&amp;username=sample">次の 100 人を取得（+$1.00）</a>`) || strings.Contains(body, "実行不可") {
+		t.Error("cap 超過でもフォロワーのページングを止めてはいけない")
+	}
+
+	// 対照: 投稿の検索は同じ cap で止まる。
+	rec = serveGet(t, router, "/search?kw=%E7%8C%AB&max=10&mode=execute")
+	if rec.Code != http.StatusForbidden || searches != 0 {
+		t.Errorf("対照: 投稿の検索は cap 超過で止まるべき: status=%d searches=%d", rec.Code, searches)
+	}
 }

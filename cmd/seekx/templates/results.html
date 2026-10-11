@@ -36,31 +36,7 @@
          サイドバー全体ではなくこのブロックだけを hidden にする（D-52）。JS が無いと動かないのは
          コントロールだけで、上のクエリ・メタ情報は JS 無しでも意味があるため。 */}}
     <div class="list-controls" id="list-controls" hidden>
-      <fieldset>
-        <legend>表示列数</legend>
-        {{/* ラジオ input は視覚的に隠すだけで DOM には残す。<button> 群に置き換えると
-             role="radiogroup" と矢印キー処理を自前で実装することになり、インライン JS の
-             行数上限（D-55）に収まらない。この形ならキーボード操作と読み上げはネイティブのまま。
-             アイコンの棒の本数が列数そのものを表す。 */}}
-        <div class="cols-options">
-          <label class="cols-option">
-            <input type="radio" name="cols" value="1" checked>
-            <span class="cols-icon" aria-hidden="true"><span></span></span>
-            <span class="sr-only">1 列</span>
-          </label>
-          <label class="cols-option">
-            <input type="radio" name="cols" value="2">
-            <span class="cols-icon" aria-hidden="true"><span></span><span></span></span>
-            <span class="sr-only">2 列</span>
-          </label>
-          <label class="cols-option">
-            <input type="radio" name="cols" value="3">
-            <span class="cols-icon" aria-hidden="true"><span></span><span></span><span></span></span>
-            <span class="sr-only">3 列</span>
-          </label>
-        </div>
-      </fieldset>
-
+      {{- template "_cols.html"}}
       {{/* 既定は閉じた状態。open 属性は付けず、開閉状態も保存しない（保存すると <details open> の
            初期値をサーバ側で出せず、読み込み後に JS で開くぶんのチラつきが出る）。
            閉じているときも絞り込みが効いていることが分かるよう、件数を summary にも出す。 */}}
