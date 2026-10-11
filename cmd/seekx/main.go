@@ -701,13 +701,7 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// 原因と次の一手が分からない画面になる（課金は発生しない）。
 	if (mode == "estimate" || mode == "execute") && !a.tokenReady() {
 		a.log.Info("トークン未設定のため実行しませんでした（API は呼び出していません）", "mode", mode)
-		a.renderError(w, r, http.StatusForbidden, "Bearer Token が設定されていません",
-			"検索するには X API の Bearer Token が必要です。API はまだ呼び出していません（課金なし）。",
-			[]string{
-				"設定画面（" + settingsPath + "）でトークンを入力してください。プロセス内にのみ保持され、ディスクには保存されません。",
-				"起動のたびの入力を避けたい場合に限り .env に BEARER_TOKEN=... を書けますが、その場合トークンはディスク上に残ります。",
-				"課金ゼロで UI を確認するだけなら SEEKX_FIXTURE_DIR=testdata を指定して再起動してください。",
-			}, f)
+		a.renderTokenMissing(w, r, "検索する", formURL(f))
 		return
 	}
 
@@ -973,25 +967,73 @@ func (a *App) render(w http.ResponseWriter, status int, name string, data any) {
 	}
 }
 
+// renderError は検索のエラー画面。「フォームに戻る」は入力を保った検索フォームへ戻す。
 func (a *App) renderError(w http.ResponseWriter, r *http.Request, status int, heading, message string, steps []string, f query.SearchForm) {
+	a.renderErrorTo(w, r, status, heading, message, steps, formURL(f))
+}
+
+// renderErrorTo はエラー画面を描画する。検索とフォロワー取得で共用し、戻るフォームが
+// 機能ごとに違うので backURL（「フォームに戻る」の行き先）は呼び出し側が渡す。
+//
+// Page の Endpoint を EndpointRecent に固定してよいのは、Endpoint が効くのは CountsCost だけで、
+// error.html（と layout.html）はそれを使わないため。検索の「全期間」から来ても出力は変わらない。
+func (a *App) renderErrorTo(w http.ResponseWriter, r *http.Request, status int, heading, message string, steps []string, backURL string) {
 	p := ErrorPage{
-		Page:     a.page("エラー", a.capStatus(r.Context()), query.EndpointOf(f.Endpoint)),
+		Page:     a.page("エラー", a.capStatus(r.Context()), xapi.EndpointRecent),
 		Heading:  heading,
 		Message:  message,
 		Steps:    steps,
-		FormURL:  formURL(f),
+		FormURL:  backURL,
 		Status:   0,
 		Messages: nil,
 	}
 	a.render(w, status, "error.html", p)
 }
 
-// renderAPIError は APIError を ErrorKind ごとの日本語画面に変換する。
-// トークン・Authorization ヘッダ・リクエスト URL 全文は絶対に出さない。
+// renderTokenMissing は Bearer Token が未設定で API を呼べないときの案内（403）。
+// purpose は「検索する」「フォロワーを取得する」のような目的で、本文の書き出しになる。
+//
+// 本文は「API はまだ呼び出していません（課金なし）」と言い切るので、【API を呼ぶ前
+// （tokenReady が偽のとき）以外に使ってはいけない】。ログはここでは出さない。何をしようとして
+// 止めたか（mode など）を知っているのはハンドラなので、他の画面と同じくハンドラ側で残す。
+func (a *App) renderTokenMissing(w http.ResponseWriter, r *http.Request, purpose, backURL string) {
+	a.renderErrorTo(w, r, http.StatusForbidden, "Bearer Token が設定されていません",
+		purpose+"には X API の Bearer Token が必要です。API はまだ呼び出していません（課金なし）。",
+		[]string{
+			"設定画面（" + settingsPath + "）でトークンを入力してください。プロセス内にのみ保持され、ディスクには保存されません。",
+			"起動のたびの入力を避けたい場合に限り .env に BEARER_TOKEN=... を書けますが、その場合トークンはディスク上に残ります。",
+			"課金ゼロで UI を確認するだけなら SEEKX_FIXTURE_DIR=testdata を指定して再起動してください。",
+		}, backURL)
+}
+
+// apiErrorView は API エラー画面のうち、機能（検索・フォロワー取得）ごとに変わる部分。
+// HTTP ステータスの対応と技術的な詳細（title・detail など）の出し方は機能に依らないので、
+// renderAPIErrorTo だけが持つ。
+type apiErrorView struct {
+	// BackURL は「フォームに戻る」の行き先。
+	BackURL string
+	// Query は生成クエリ。KindInvalidQuery のときだけ画面に出る。
+	// クエリを組み立てない機能（フォロワー取得）では空のままでよい。
+	Query string
+	// Steps は ErrorKind ごとの対処手順。nil なら手順を出さない。検索の errorSteps を既定に
+	// しないのは、検索エンドポイントや生成クエリを前提にした手順が別の機能の画面に紛れ込むため。
+	Steps func(xapi.ErrorKind) []string
+	// Text は見出しと本文。nil なら ErrorKind の既定（Kind.Title と UserMessage）で、検索はこちら。
+	Text func(*xapi.APIError) (heading, message string)
+}
+
+// renderAPIError は検索の API エラー画面。戻り先・生成クエリ・手順を検索のものにして渡す。
 func (a *App) renderAPIError(w http.ResponseWriter, r *http.Request, err error, f query.SearchForm, generatedQuery string) {
+	a.renderAPIErrorTo(w, r, err, apiErrorView{BackURL: formURL(f), Query: generatedQuery, Steps: errorSteps})
+}
+
+// renderAPIErrorTo は APIError を ErrorKind ごとの日本語画面に変換する。
+// トークン・Authorization ヘッダ・リクエスト URL 全文は絶対に出さない。
+// Page の Endpoint を固定してよい理由は renderErrorTo と同じ。
+func (a *App) renderAPIErrorTo(w http.ResponseWriter, r *http.Request, err error, v apiErrorView) {
 	ae, ok := err.(*xapi.APIError)
 	if !ok {
-		a.renderError(w, r, http.StatusInternalServerError, "予期しないエラー", err.Error(), nil, f)
+		a.renderErrorTo(w, r, http.StatusInternalServerError, "予期しないエラー", err.Error(), nil, v.BackURL)
 		return
 	}
 
@@ -1007,20 +1049,29 @@ func (a *App) renderAPIError(w http.ResponseWriter, r *http.Request, err error, 
 		status = http.StatusTooManyRequests
 	}
 
+	heading, message := ae.Kind.Title(), ae.UserMessage(a.loc)
+	if v.Text != nil {
+		heading, message = v.Text(ae)
+	}
+	var steps []string
+	if v.Steps != nil {
+		steps = v.Steps(ae.Kind)
+	}
+
 	p := ErrorPage{
-		Page:     a.page("エラー", a.capStatus(r.Context()), query.EndpointOf(f.Endpoint)),
-		Heading:  ae.Kind.Title(),
-		Message:  ae.UserMessage(a.loc),
-		Steps:    errorSteps(ae.Kind),
+		Page:     a.page("エラー", a.capStatus(r.Context()), xapi.EndpointRecent),
+		Heading:  heading,
+		Message:  message,
+		Steps:    steps,
 		Status:   ae.Status,
 		APITitle: ae.Title,
 		Detail:   ae.Detail,
 		Reason:   ae.Reason,
 		Messages: ae.Messages,
-		FormURL:  formURL(f),
+		FormURL:  v.BackURL,
 	}
 	if ae.Kind == xapi.KindInvalidQuery {
-		p.Query = generatedQuery // 400 のときは生成クエリ全文を必ず出す
+		p.Query = v.Query // 400 のときは生成クエリ全文を必ず出す
 	}
 	a.render(w, status, "error.html", p)
 }
