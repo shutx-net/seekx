@@ -186,6 +186,7 @@ func newRouter(app *App) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", app.handleIndex)
 	mux.HandleFunc("GET /search", app.handleSearch)
+	mux.HandleFunc("GET "+followersPath, app.handleFollowers)
 	mux.HandleFunc("GET /healthz", app.handleHealthz)
 	// トークンの設定は POST のみ。GET にすると値が URL・履歴・ログに残る（D-23 の例外）。
 	mux.HandleFunc("GET "+settingsPath, app.handleSettings)
@@ -272,6 +273,8 @@ type Page struct {
 	// TokenConfigured は Bearer Token が設定済みかどうか。値そのものは渡さない。
 	TokenConfigured bool
 	SettingsURL     string
+	// FollowersURL はヘッダの「フォロワー取得」とフォームの送信先。パスは followersPath だけが持つ。
+	FollowersURL string
 }
 
 // PageID は <html data-page> に出す識別子。CSS がページ種別でレイアウトを変えるために使う。
@@ -392,6 +395,7 @@ func (a *App) page(title string, cap cost.CapStatus, ep xapi.Endpoint) Page {
 		CountsCost:      cost.CountsCostFor(ep),
 		TokenConfigured: a.client.HasToken(),
 		SettingsURL:     settingsPath,
+		FollowersURL:    followersPath,
 	}
 }
 
