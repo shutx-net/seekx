@@ -1,0 +1,30 @@
+{{/* 一覧の表示列数（1 / 2 / 3 列）の切り替え。結果ページ（results.html）とフォロワー一覧（followers.html）が
+     .list-controls の中で共用する。どちらの一覧も .post-list のグリッドと列数の閾値を使う。列数の保存と適用は
+     app.js が受け持つ。
+
+     インデントは呼び出し位置（.list-controls の直下）に合わせてあり、呼び出し側は {{- template "_cols.html"}}
+     の形で直前の改行と空白を落とす。切り出す前の results.html と出力を 1 バイトも変えないため。 */}}
+      <fieldset>
+        <legend>表示列数</legend>
+        {{/* ラジオ input は視覚的に隠すだけで DOM には残す。<button> 群に置き換えると
+             role="radiogroup" と矢印キー処理を自前で実装することになり、インライン JS の
+             行数上限（D-55）に収まらない。この形ならキーボード操作と読み上げはネイティブのまま。
+             アイコンの棒の本数が列数そのものを表す。 */}}
+        <div class="cols-options">
+          <label class="cols-option">
+            <input type="radio" name="cols" value="1" checked>
+            <span class="cols-icon" aria-hidden="true"><span></span></span>
+            <span class="sr-only">1 列</span>
+          </label>
+          <label class="cols-option">
+            <input type="radio" name="cols" value="2">
+            <span class="cols-icon" aria-hidden="true"><span></span><span></span></span>
+            <span class="sr-only">2 列</span>
+          </label>
+          <label class="cols-option">
+            <input type="radio" name="cols" value="3">
+            <span class="cols-icon" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span class="sr-only">3 列</span>
+          </label>
+        </div>
+      </fieldset>

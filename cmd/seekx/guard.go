@@ -3,7 +3,11 @@ package main
 // guard.go は HTTP リクエストの入口で「そのリクエストを受け付けてよいか」を判定する。
 //
 // なぜ必要か:
-//   - GET /search?mode=execute は課金が発生する唯一の経路（main.go の executeSearch）。
+//   - 課金が発生する経路は GET /search?mode=estimate|execute と GET /followers?mode=estimate|execute
+//     （X API を呼ぶのは main.go の handleEstimate・executeSearch と followers.go の lookupUser・fetchFollowers）。
+//     ガードは mux 全体を包む（newRouter）ので、新しい経路にも自動で効く。他サイト起点の拒否は
+//     guard_test.go の TestRequestGuardBlocksCrossSiteBilling（検索の実行）と
+//     TestRequestGuardBlocksCrossSiteFollowers（フォロワーの見積り・取得）が固定する。
 //     このサーバは認証を持たないため、対策が無いと
 //     他サイトに置かれた <img src="http://localhost:PORT/search?mode=execute&…"> を
 //     ユーザーのブラウザが読み込むだけで課金が発火する。レスポンスは同一オリジンポリシーで
@@ -106,7 +110,7 @@ func hostAllowed(host string, allowed []string) bool {
 //
 // Fetch Metadata の標準的な方針は cross-site でも「トップレベル遷移かつ GET」は
 // 許可する（他サイトからの被リンクを壊さないため）。seekx はここで意図的に外れる。
-// 課金経路が GET のトップレベル遷移そのもの（/search?mode=execute）であり、
+// 課金経路が GET のトップレベル遷移そのもの（/search と /followers の mode=estimate|execute）であり、
 // 他サイトから正当にリンクされる場面が無いため、許可すると穴が塞がらない。
 //
 // Sec-Fetch-Site が無い場合は Origin にフォールバックする。どちらも無い場合は許可する

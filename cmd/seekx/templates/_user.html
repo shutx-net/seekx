@@ -1,0 +1,66 @@
+<article class="user-card">
+  {{/* ユーザーカード（view.ViewUser）。見積り画面の対象ユーザーとフォロワー一覧で共用する。
+       頭の部分は投稿カードの .post-head（アバター 48px・名前・X ロゴ）をそのまま使う。 */}}
+  <div class="post-head">
+    {{/* 表示要件: プロフィール画像・表示名・@username はいずれもプロフィールへリンクする。
+         アバターは表示名と @username の左に置く。 */}}
+    {{if .ProfileImageURL}}
+      {{if .ProfileURL}}
+      <a href="{{.ProfileURL}}" rel="noreferrer" aria-label="{{.Name}} のプロフィール"><img class="avatar" src="{{.ProfileImageURL}}" alt="{{.Name}} のプロフィール画像" width="48" height="48" loading="lazy" decoding="async"></a>
+      {{else}}
+      <img class="avatar" src="{{.ProfileImageURL}}" alt="{{.Name}} のプロフィール画像" width="48" height="48" loading="lazy" decoding="async">
+      {{end}}
+    {{else}}
+    <div class="avatar avatar-missing" aria-hidden="true">?</div>
+    {{end}}
+
+    <div class="author">
+      <div>
+        {{if .ProfileURL}}
+        <a class="author-name" href="{{.ProfileURL}}" rel="noreferrer">{{.Name}}</a>
+        {{else}}
+        <span class="author-name">{{.Name}}</span>
+        {{end}}
+        {{if .Verified}}<span class="verified" title="認証済み{{if .VerifiedType}}（{{.VerifiedType}}）{{end}}">✔</span>{{end}}
+        {{if .Protected}}<span class="flag">鍵アカウント</span>{{end}}
+      </div>
+      {{/* ユーザー名が空（想定外の応答）なら「@」だけを出さない。 */}}
+      {{if .ProfileURL}}
+      <a class="author-handle" href="{{.ProfileURL}}" rel="noreferrer">@{{.Username}}</a>
+      {{else if .Username}}
+      <span class="author-handle">@{{.Username}}</span>
+      {{end}}
+    </div>
+
+    {{/* 投稿カードと同じく右上に置く。ユーザーには恒久リンクが無いのでプロフィールへリンクする
+         （リンク先が無いときは置かない。空の href は今のページへのリンクになる）。 */}}
+    {{if .ProfileURL}}
+    <a class="x-logo" href="{{.ProfileURL}}" title="X で表示" rel="noreferrer">
+      <img src="/static/x-logo.svg" alt="X" width="16" height="16">
+    </a>
+    {{end}}
+  </div>
+
+  {{/* 自己紹介は未加工で出す（改行は CSS の pre-wrap で表す。<br> に置き換えない）。 */}}
+  {{if .Description}}<div class="user-bio">{{.Description}}</div>{{end}}
+
+  {{if or .Location .URL .CreatedAtDisplay}}
+  <div class="user-meta">
+    {{if .Location}}<span>{{.Location}}</span>{{end}}
+    {{/* Web サイトは利用者が自由に書ける外部リンクなので nofollow を付ける。
+         http(s) 以外のスキームは view.BuildUserView が捨ててある。 */}}
+    {{if .URL}}<a href="{{.URL}}" rel="noreferrer nofollow">{{.URL}}</a>{{end}}
+    {{if .CreatedAtDisplay}}<span><time datetime="{{.CreatedAtISO}}">{{.CreatedAtDisplay}}</time> に登録</span>{{end}}
+  </div>
+  {{end}}
+
+  {{/* 指標が欠けたユーザーは「0」ではなく「不明」なので、ブロックごと出さない（ViewUserMetrics）。 */}}
+  {{if .Metrics.HasMetrics}}
+  <div class="metrics">
+    <span>フォロワー {{num .Metrics.Followers}}</span>
+    <span>フォロー {{num .Metrics.Following}}</span>
+    <span>投稿 {{num .Metrics.Posts}}</span>
+    <span>リスト {{num .Metrics.Listed}}</span>
+  </div>
+  {{end}}
+</article>

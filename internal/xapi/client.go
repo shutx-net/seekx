@@ -4,7 +4,8 @@ package xapi
 //
 // 制約（file_layout）:
 //   - 他の internal パッケージを import しない（このパッケージは依存グラフの葉である）
-//   - クエリ構文のバリデーションを行わない（internal/query が済ませている前提。空クエリだけは防御的に弾く）
+//   - クエリ構文のバリデーションを行わない（internal/query が済ませている前提。空クエリと、
+//     パスに埋めるユーザー名・ID のうちパスを壊す値だけは防御的に弾く）
 //   - HTML やテンプレートに触らない
 //   - Authorization ヘッダやトークンをログ・エラーに出さない
 //   - includes の結合を行わない（internal/view の責務）
@@ -22,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -299,6 +301,12 @@ const (
 	pathCountsRecent = "/tweets/counts/recent"
 	pathCountsAll    = "/tweets/counts/all"
 	pathUsage        = "/usage/tweets"
+
+	// ユーザー検索（/users/by/username/{username}）とフォロワー取得（/users/{id}/followers）は
+	// パスに値を埋め込むので、値の前後の固定部分を持つ。
+	pathUsersByUsername = "/users/by/username/"
+	pathUsers           = "/users/"
+	pathFollowersSuffix = "/followers"
 )
 
 // SearchPath は endpoint に対応する検索パスを返す。
@@ -434,13 +442,81 @@ func (c *Client) Usage(ctx context.Context) (*UsageResponse, error) {
 	return &out, nil
 }
 
+// UserByUsername はユーザー検索（GET /2/users/by/username/:username）を行う。
+// ユーザーが返れば User: Read（CostPerUserRead）が 1 人分かかる。存在しない・凍結された
+// ユーザーは HTTP 200 で data が無く errors だけが返り、エラーにはならない（扱いは呼び出し側が決める）。
+//
+// 送るクエリは user.fields だけ。【expansions を送らない】ピン留め投稿などを展開すると投稿が
+// includes に入り、post read として課金され得る（UserLookupParams が Expansions を持たない理由）。
+func (c *Client) UserByUsername(ctx context.Context, p UserLookupParams) (*UserLookupResponse, *RateLimit, error) {
+	if !isPathToken(p.Username) {
+		return nil, nil, &APIError{Kind: KindInvalidQuery, Detail: "ユーザー名が不正です（API は呼び出していません）。"}
+	}
+	v := url.Values{}
+	if len(p.UserFields) > 0 {
+		v.Set("user.fields", strings.Join(p.UserFields, ","))
+	}
+	var out UserLookupResponse
+	rl, err := c.do(ctx, pathUsersByUsername+p.Username, v, &out)
+	if err != nil {
+		return nil, rl, err
+	}
+	return &out, rl, nil
+}
+
+// Followers はフォロワー一覧（GET /2/users/:id/followers）を 1 ページ取得する。
+// 返ったユーザー 1 人ごとに Following/Followers: Read（CostPerFollowsRead）がかかる。
+//
+// 【expansions を送らない】理由は UserByUsername と同じ（FollowersParams も Expansions を持たない）。
+// full-archive と違ってペーシングしない（needsPacing の対象外）。レートリミットは 15 分 300
+// リクエスト（docs の値）で、1 ページずつ人が操作する手動ページングでは届かない。
+func (c *Client) Followers(ctx context.Context, p FollowersParams) (*FollowersResponse, *RateLimit, error) {
+	if !isDigits(p.UserID) {
+		return nil, nil, &APIError{Kind: KindInvalidQuery, Detail: "ユーザー ID が不正です（API は呼び出していません）。"}
+	}
+	v := url.Values{}
+	if p.MaxResults > 0 {
+		v.Set("max_results", strconv.Itoa(p.MaxResults))
+	}
+	if p.PaginationToken != "" {
+		v.Set("pagination_token", p.PaginationToken)
+	}
+	if len(p.UserFields) > 0 {
+		v.Set("user.fields", strings.Join(p.UserFields, ","))
+	}
+	var out FollowersResponse
+	rl, err := c.do(ctx, pathUsers+p.UserID+pathFollowersSuffix, v, &out)
+	if err != nil {
+		return nil, rl, err
+	}
+	return &out, rl, nil
+}
+
+// パスやフィクスチャのファイル名に埋め込む値の文字種。
+var (
+	pathTokenRe    = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+	digitsRe       = regexp.MustCompile(`^[0-9]+$`)
+	fixtureTokenRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+)
+
+// isPathToken は s が非空で、ASCII の英数字と _ だけでできているかを返す。
+//
+// ユーザー名の形式（15 文字以内など）の検証は internal/query の責務で、ここでは行わない。
+// ここで弾くのは / . % 空白などパスを壊す文字だけで、検証を経ずに渡った値が別のパスを指したり
+// （../ や /）、フィクスチャのファイル名に混ざったりしないための防御である。
+func isPathToken(s string) bool { return pathTokenRe.MatchString(s) }
+
+// isDigits は s が非空で、ASCII の数字だけでできているかを返す。ユーザー ID をパスに埋める前の
+// 防御で、isPathToken と同じく形式（桁数など）の検証は internal/query の責務。
+func isDigits(s string) bool { return digitsRe.MatchString(s) }
+
 // ---------------------------------------------------------------------------
 // do（HTTP 実行・リトライ・エラー分類）
 // ---------------------------------------------------------------------------
 
 func (c *Client) do(ctx context.Context, path string, q url.Values, out any) (*RateLimit, error) {
 	if c.fixtureDir != "" {
-		return c.readFixture(path, out)
+		return c.readFixture(path, q, out)
 	}
 	if c.httpClient == nil {
 		return nil, &APIError{Kind: KindNetwork, Detail: "HTTP クライアントが初期化されていません。"}
@@ -645,6 +721,17 @@ func (c *Client) logCall(path string, q url.Values, status int, out any, rl *Rat
 		} else {
 			est = CostPerCountsRecent
 		}
+	case *UserLookupResponse:
+		// ユーザーが返ったときだけ 1 人分かかる（errors だけなら課金なし）。
+		resultCount = 0
+		if v.Data != nil {
+			resultCount = 1
+			est = CostPerUserRead
+		}
+	case *FollowersResponse:
+		// 課金は返ったユーザーの人数単位なので、data の件数で数える。
+		resultCount = len(v.Data)
+		est = float64(len(v.Data)) * CostPerFollowsRead
 	}
 	c.log.Info("api call",
 		"endpoint", path,
@@ -768,16 +855,25 @@ func parseQueryLengthLimit(body string) int {
 // フィクスチャモード（D-22）
 // ---------------------------------------------------------------------------
 
-func (c *Client) readFixture(path string, out any) (*RateLimit, error) {
-	name := fixtureNameFor(path)
-	if c.fixtureFile != "" && (path == pathSearchRecent || path == pathSearchAll) {
-		name = c.fixtureFile
+// readFixture は fixtureCandidates の候補を順に試し、最初に存在したファイルを out に読む。
+// どれも存在しなければ、最後の候補（既定のファイル）のエラーを返す。
+func (c *Client) readFixture(path string, q url.Values, out any) (*RateLimit, error) {
+	names, err := c.fixtureCandidates(path, q)
+	if err != nil {
+		return nil, err
 	}
-	file := filepath.Join(c.fixtureDir, name)
-	b, err := os.ReadFile(file)
-	if err != nil && os.IsNotExist(err) && path == pathCountsAll {
-		file = filepath.Join(c.fixtureDir, "counts_recent.json")
+	var (
+		file string
+		b    []byte
+	)
+	for _, name := range names {
+		file = filepath.Join(c.fixtureDir, name)
 		b, err = os.ReadFile(file)
+		// 次の候補へ進むのは「存在しない」ときだけ。読めない個別のファイルを飛ばして既定のファイルを
+		// 返すと、個別のフィクスチャが使われていないことに気付けない。
+		if err == nil || !os.IsNotExist(err) {
+			break
+		}
 	}
 	if err != nil {
 		return nil, &APIError{
@@ -794,6 +890,56 @@ func (c *Client) readFixture(path string, out any) (*RateLimit, error) {
 	}
 	c.log.Info("fixture read", "endpoint", path, "file", file)
 	return nil, nil
+}
+
+// fixtureCandidates は path と q に対応するフィクスチャのファイル名を、試す順に返す。
+//
+// ユーザー検索とフォロワー取得は、ユーザー名・ID・ページングトークンからファイルを選ぶ。
+// 環境変数を増やさずに、ユーザー名で状態（鍵アカウント・フォロワー 0 人・存在しないユーザー）を、
+// トークンでページを切り替えるため。
+//
+//   - 検索: search_recent.json / search_all.json。SEEKX_FIXTURE_FILE があればそれだけ
+//   - counts/all: counts_all.json → counts_recent.json
+//   - /users/by/username/{u}: users_by_username_{小文字の u}.json → users_by_username.json
+//     （X のユーザー名は大文字小文字を区別しないので、ファイル名は小文字に揃える）
+//   - /users/{id}/followers（トークンなし）: users_followers_{id}.json → users_followers.json
+//   - /users/{id}/followers（トークン t あり）: users_followers_{t}.json だけ。
+//     【1 ページ目に落とさない】無いページの代わりに 1 ページ目を返すと、ページングが
+//     正しく動いているように見えて取り違えに気付けない
+//
+// 値はファイル名に埋め込むので、パスを壊す文字（/ . など）を含む値は読む前に KindDecode で弾く。
+// ユーザー名と ID は UserByUsername / Followers が API を呼ぶ前に弾いているが、ここでも確かめる
+// （ファイルを読む直前の防御を、呼び出し側の検証に頼らない）。
+func (c *Client) fixtureCandidates(path string, q url.Values) ([]string, error) {
+	switch {
+	case path == pathSearchRecent || path == pathSearchAll:
+		if c.fixtureFile != "" {
+			return []string{c.fixtureFile}, nil
+		}
+		return []string{fixtureNameFor(path)}, nil
+	case path == pathCountsAll:
+		return []string{fixtureNameFor(pathCountsAll), fixtureNameFor(pathCountsRecent)}, nil
+	case strings.HasPrefix(path, pathUsersByUsername):
+		u := strings.TrimPrefix(path, pathUsersByUsername)
+		if !isPathToken(u) {
+			return nil, &APIError{Kind: KindDecode, Detail: "ユーザー名に英数字と _ 以外の文字が含まれるため、フィクスチャのファイル名にできません。"}
+		}
+		return []string{"users_by_username_" + strings.ToLower(u) + ".json", "users_by_username.json"}, nil
+	case strings.HasPrefix(path, pathUsers) && strings.HasSuffix(path, pathFollowersSuffix):
+		id := strings.TrimSuffix(strings.TrimPrefix(path, pathUsers), pathFollowersSuffix)
+		if !isDigits(id) {
+			return nil, &APIError{Kind: KindDecode, Detail: "ユーザー ID に数字以外の文字が含まれるため、フィクスチャのファイル名にできません。"}
+		}
+		if t := q.Get("pagination_token"); t != "" {
+			if !fixtureTokenRe.MatchString(t) {
+				return nil, &APIError{Kind: KindDecode, Detail: "ページングトークンに英数字・_・- 以外の文字が含まれるため、フィクスチャのファイル名にできません。"}
+			}
+			return []string{"users_followers_" + t + ".json"}, nil
+		}
+		return []string{"users_followers_" + id + ".json", "users_followers.json"}, nil
+	default:
+		return []string{fixtureNameFor(path)}, nil
+	}
 }
 
 func fixtureNameFor(path string) string {

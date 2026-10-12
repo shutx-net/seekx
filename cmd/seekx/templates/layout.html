@@ -17,17 +17,19 @@
     {{if .FixtureMode}}<span class="badge badge-fixture">フィクスチャモード（課金 0）</span>{{end}}
     <span class="badge" title="このプロセスを起動してからの推定コスト">セッション {{usd .SessionUSD}} / {{.SessionCalls}} 回</span>
     {{if .Cap.Known}}<span class="badge" title="月次 post read cap の消費状況（毎月 {{.Cap.ResetDay}} 日リセット）">月次 cap {{num .Cap.Usage}} / {{num .Cap.Cap}}（{{pct .Cap.Percent}}）</span>{{end}}
+    <a class="badge" href="/">投稿検索</a>
+    <a class="badge" href="{{.FollowersURL}}">フォロワー取得</a>
     <a class="badge" href="{{.SettingsURL}}">設定</a>
   </div>
 </header>
 {{if and (not .FixtureMode) (not .TokenConfigured)}}
-<div class="banner banner-block">Bearer Token が設定されていません。<a href="{{.SettingsURL}}">設定</a>から入力するか、.env に <code>BEARER_TOKEN=...</code> を書いてください。検索は実行できません（課金は発生しません）。</div>
+<div class="banner banner-block">Bearer Token が設定されていません。<a href="{{.SettingsURL}}">設定</a>から入力するか、.env に <code>BEARER_TOKEN=...</code> を書いてください。検索・フォロワー取得は実行できません（課金は発生しません）。</div>
 {{end}}
 {{if .Cap.IsWarn}}
 <div class="banner banner-warn">月次上限の {{pct .Cap.Percent}} を消費しています（{{num .Cap.Usage}} / {{num .Cap.Cap}} post reads）。リセットは毎月 {{.Cap.ResetDay}} 日です。</div>
 {{end}}
 {{if .Cap.IsBlock}}
-<div class="banner banner-block">月次上限の {{pct .Cap.Percent}} を消費しています（{{num .Cap.Usage}} / {{num .Cap.Cap}} post reads）。検索の実行は停止されます。リセットは毎月 {{.Cap.ResetDay}} 日です。どうしても続行する場合は SEEKX_ALLOW_OVER_CAP=1 を設定して再起動してください。</div>
+<div class="banner banner-block">月次上限の {{pct .Cap.Percent}} を消費しています（{{num .Cap.Usage}} / {{num .Cap.Cap}} post reads）。投稿の検索は停止されます（フォロワー取得は post reads を消費しないため止めません）。リセットは毎月 {{.Cap.ResetDay}} 日です。どうしても続行する場合は SEEKX_ALLOW_OVER_CAP=1 を設定して再起動してください。</div>
 {{end}}
 <main>
 {{- end}}
@@ -37,9 +39,11 @@
 <footer class="site-footer">
   <p>seekx — ローカル専用の X（旧 Twitter）投稿検索ツール。表示している投稿・画像・動画の権利は各投稿者および X に帰属します。</p>
   <p>取得データは永続化しません（プロセスメモリのみ）。表示は {{.TZ}} 基準です。</p>
-  <p>検索は従量課金です（投稿 1 件 $0.005 / counts 1 リクエスト $0.005〜）。ページの再読み込みは再検索になります。</p>
+  <p>X API は従量課金です（投稿 1 件 $0.005 / ユーザー 1 人 $0.010 / counts 1 リクエスト $0.005〜）。ページの再読み込みは再取得になります。</p>
 </footer>
 <script src="/static/js/app.js"></script>
+<!-- CSV の保存（フォロワー一覧）。全ページで読み、保存するものが無いページでは何もしない。ボタンとデータを読むので本文の末尾に置く。 -->
+<script src="/static/js/csv.js"></script>
 </body>
 </html>
 {{- end}}

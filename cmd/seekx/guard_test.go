@@ -154,6 +154,79 @@ func TestRequestGuardBlocksCrossSiteBilling(t *testing.T) {
 	}
 }
 
+// TestRequestGuardBlocksCrossSiteFollowers は他サイト起点のフォロワーの見積り（ユーザー検索）と
+// 取得（フォロワー取得）が課金経路へ到達しないことを確認する。TestRequestGuardBlocksCrossSiteBilling の
+// 回帰テストをフォロワーの 2 経路に広げたもの。guard は mux 全体を包むので経路ごとの対応は要らないが、
+// /followers だけが guard の外に出るような組み替えを検出できるよう、経路ごとに固定する。
+//
+// 経路ごとに same-origin なら API に到達することも同時に固定する（対照群）。
+// そうしないと「常に 403」という誤修正でもこのテストが通ってしまう。
+func TestRequestGuardBlocksCrossSiteFollowers(t *testing.T) {
+	cases := []struct {
+		name   string
+		target string
+		// wantPath は同一オリジンのときに届くべき課金経路（X API のパス）。
+		wantPath string
+	}{
+		{"見積り（ユーザー検索）", "/followers?username=sample&max=100&mode=estimate", "/users/by/username/sample"},
+		{"取得（フォロワー取得）", "/followers?id=20000001&username=sample&max=100&mode=execute", "/users/20000001/followers"},
+	}
+	localPort := "localhost:" + config.DefaultPort
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// /users/ 配下（ユーザー検索とフォロワー取得。どちらも課金経路）に届いたパスを記録する。
+			// 記録は応答を書く前に行う（テスト側が応答を受け取った時点で記録が済んでいるように）。
+			var reached []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/users/") {
+					reached = append(reached, r.URL.Path)
+				}
+				switch {
+				case strings.HasPrefix(r.URL.Path, "/users/by/username/"):
+					_, _ = w.Write([]byte(`{"data":{"id":"20000001","name":"n","username":"sample","public_metrics":{"followers_count":1}}}`))
+				case strings.HasPrefix(r.URL.Path, "/users/") && strings.HasSuffix(r.URL.Path, "/followers"):
+					_, _ = w.Write([]byte(`{"data":[],"meta":{"result_count":0}}`))
+				case strings.HasPrefix(r.URL.Path, "/usage/tweets"):
+					_, _ = w.Write([]byte(`{"data":{"project_cap":"2000000","project_usage":"0","cap_reset_day":12}}`))
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			// トークンを設定しておく。未設定だとトークン未設定の案内（403）で止まり、guard を検査できない。
+			app := testApp(t, config.Config{BearerToken: "t", APIBaseURL: srv.URL})
+			router := newRouter(app)
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, guardRequest(tc.target, localPort, "cross-site", "https://evil.example"))
+
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("他サイト起点の課金リクエストは拒否されるべき: status=%d", rec.Code)
+			}
+			if len(reached) != 0 {
+				t.Errorf("他サイト起点で X API の課金経路を呼んではいけない: reached=%v", reached)
+			}
+			// トークン未設定の案内（同じく 403 で API を呼ばない）と取り違えていないことを本文で区別する。
+			if !strings.Contains(rec.Body.String(), "SEEKX_ALLOWED_HOSTS") {
+				t.Errorf("guard 以外の理由で 403 になっている可能性がある: %s", truncate(rec.Body.String(), 300))
+			}
+
+			// 対照群: 同一オリジンなら課金経路まで到達する。
+			rec = httptest.NewRecorder()
+			router.ServeHTTP(rec, guardRequest(tc.target, localPort, "same-origin", "http://"+localPort))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("同一オリジンのリクエストは通るべき: status=%d body=%s", rec.Code, truncate(rec.Body.String(), 300))
+			}
+			if len(reached) != 1 || reached[0] != tc.wantPath {
+				t.Errorf("同一オリジンでは課金経路 %s にちょうど 1 回到達するべき: reached=%v", tc.wantPath, reached)
+			}
+		})
+	}
+}
+
 // TestRequestGuardRejectionKeepsSecurityHeaders は拒否した応答にも
 // セキュリティヘッダが付くことを確認する（ミドルウェアの入れ子の順序）。
 func TestRequestGuardRejectionKeepsSecurityHeaders(t *testing.T) {

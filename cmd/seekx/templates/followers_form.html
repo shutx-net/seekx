@@ -1,0 +1,40 @@
+{{template "top" .}}
+
+<h1>フォロワーを取得する</h1>
+
+{{if .Errors}}
+<div class="notice notice-error">
+  <strong>取得できません（API は呼び出していません）</strong>
+  <ul>{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
+
+<form action="{{.FollowersURL}}" method="get">
+  <fieldset>
+    <legend>対象アカウント</legend>
+    <div class="field">
+      <label for="username">ユーザー名</label>
+      <input type="text" id="username" name="username" value="{{.Form.Username}}"
+        placeholder="nasa（@ は省略可）" autocapitalize="off" spellcheck="false">
+      {{if .FixtureExamples}}
+      <p class="hint">フィクスチャモードでは次のユーザー名で各状態を確認できます: {{range $i, $name := .FixtureExamples}}{{if $i}} / {{end}}<code>{{$name}}</code>{{end}}（それ以外のユーザー名は通常のアカウントになります）。</p>
+      {{end}}
+    </div>
+    <div class="field">
+      <label for="max">1 ページの人数</label>
+      <select id="max" name="max">
+        {{range .PageSizeOptions}}
+        <option value="{{.Value}}"{{if eq $.Form.MaxResults .Value}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit" name="mode" value="estimate">フォロワー数を見積る（{{usd .LookupCost}}）</button>
+  </div>
+  <p class="hint">見積りでは対象アカウントの情報（ユーザー 1 人分・{{usd .LookupCost}}）を取得し、フォロワー数と予想コストを表示します。</p>
+  <p class="hint">フォロワーは見積り画面から 1 ページずつ取得し、そのたびに金額を表示します（一括取得はありません）。</p>
+</form>
+
+{{template "bottom" .}}

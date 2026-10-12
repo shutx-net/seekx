@@ -113,7 +113,8 @@ type Includes struct {
 	Topics []json.RawMessage `json:"topics"`
 }
 
-// User は投稿者。表示要件（名前・@username・プロフィール画像）を満たすため必須。
+// User は検索の includes.users（投稿者）と、ユーザー検索・フォロワー取得の data の両方で使う。
+// ID〜VerifiedType は表示要件（名前・@username・プロフィール画像）を満たすため必須。
 type User struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
@@ -121,6 +122,38 @@ type User struct {
 	ProfileImageURL string `json:"profile_image_url"`
 	Verified        bool   `json:"verified"`
 	VerifiedType    string `json:"verified_type"`
+
+	// ここから下はユーザー検索・フォロワー取得（UserProfileFieldsRequested）だけが要求する項目。
+	// 検索（UserFieldsRequested）では要求しないので、includes.users では常にゼロ値になる。
+	// JSON タグは docs の user.fields の名前で、seekx では未実測。
+	Description   string       `json:"description"`
+	Location      string       `json:"location"`
+	URL           string       `json:"url"` // プロフィールの Web サイト
+	Protected     bool         `json:"protected"`
+	CreatedAt     time.Time    `json:"created_at"`
+	PublicMetrics *UserMetrics `json:"public_metrics,omitempty"` // 欠落時は nil（「0」と「不明」を区別する）
+}
+
+// UserMetrics はユーザーの public_metrics。
+//
+// 投稿数が tweet_count と post_count のどちらで返るかは未実測。post 系リネームは投稿の
+// public_metrics には及んだが（R-03）、counts のレスポンスには及んでいない（DR-01）ので、
+// ユーザーについてはどちらもあり得る。名前を外すと値が常に 0 になり、エラーにならないため
+// 気付けない。PostMetrics.Reposts と同じく両方を持ち、Posts() で非ゼロの方を採用する。
+type UserMetrics struct {
+	FollowersCount int `json:"followers_count"`
+	FollowingCount int `json:"following_count"`
+	TweetCount     int `json:"tweet_count"` // 従来の名前
+	PostCount      int `json:"post_count"`  // リネームが及んだ場合の名前
+	ListedCount    int `json:"listed_count"`
+}
+
+// Posts は投稿数を返す。post_count を優先し、無ければ tweet_count を使う。
+func (m UserMetrics) Posts() int {
+	if m.PostCount != 0 {
+		return m.PostCount
+	}
+	return m.TweetCount
 }
 
 // Media は media_key で join する。
@@ -187,6 +220,23 @@ type UsageResponse struct {
 	} `json:"data"`
 }
 
+// UserLookupResponse は GET /2/users/by/username/:username のレスポンス。
+// data は配列ではなくオブジェクト 1 件。存在しない・凍結されたユーザーは HTTP 200 で
+// data が無く errors だけが返るので、Data はポインタにして「無い」を nil で表す。
+type UserLookupResponse struct {
+	Data   *User           `json:"data,omitempty"`
+	Errors []ProblemDetail `json:"errors,omitempty"`
+}
+
+// FollowersResponse は GET /2/users/:id/followers のレスポンス。
+// ページングは検索と同じ Meta（result_count / next_token / previous_token）で受ける。
+// expansions を付けない（FollowersParams が持たない）ので includes は持たない。
+type FollowersResponse struct {
+	Data   []User          `json:"data"`
+	Meta   Meta            `json:"meta"`
+	Errors []ProblemDetail `json:"errors,omitempty"` // 200 での部分成功エラー
+}
+
 // APIProblem は 4xx / 5xx の problem-details 形式エラー本文。
 type APIProblem struct {
 	Title  string          `json:"title"`
@@ -222,6 +272,22 @@ func (p ProblemDetail) Describe() string {
 	default:
 		return "詳細不明のエラー"
 	}
+}
+
+// IsNotFound は対象のリソースが見つからないことを示すエラーかを返す。
+//
+// type は "https://api.twitter.com/2/problems/resource-not-found" のような URI で返る。
+// ホスト名（api.twitter.com / api.x.com）は移行の途中で変わり得るので、区切りの / を含めた
+// 末尾だけで判定する（title の文言では判定しない）。
+func (p ProblemDetail) IsNotFound() bool {
+	return strings.HasSuffix(p.Type, "/resource-not-found")
+}
+
+// IsNotAuthorized は対象のリソースを読む権限が無いことを示すエラーかを返す
+// （鍵アカウントのフォロワーを App-only で読んだときに返る想定・未実測）。
+// 判定の仕方は IsNotFound と同じ。
+func (p ProblemDetail) IsNotAuthorized() bool {
+	return strings.HasSuffix(p.Type, "/not-authorized-for-resource")
 }
 
 // flexInt は JSON の文字列でも数値でも int として受け取る（R-04 への保険）。

@@ -1,0 +1,119 @@
+{{template "top" .}}
+
+{{if .TargetUsername}}
+<h1>@{{.TargetUsername}} のフォロワー</h1>
+{{else}}
+<h1>ユーザー ID {{.TargetID}} のフォロワー</h1>
+{{end}}
+
+{{/* 結果ページ（results.html）と同じ 2 カラム。FollowersPage.PageID が "results" を返すので、同じ CSS が当たる。
+     左は「この取得についての情報と操作」、右はユーザーカードだけ。
+
+     金額が発生するリンク（前後のページの取得・再見積り）は右のカード列に置く。サイドバーは常時見える位置なので、
+     置くと誤クリックを招く（docs/ui.md。結果ページと同じ方針）。 */}}
+<div class="results-layout">
+  {{/* サイドバーの並びは結果ページと同じ「注意 → 操作 → 参照」。警告は条件付きなので普段は場所を取らない。 */}}
+  <div class="results-side">
+    {{if .Result.Warnings}}
+    <div class="notice notice-warn">
+      <ul>{{range .Result.Warnings}}<li>{{.}}</li>{{end}}</ul>
+    </div>
+    {{end}}
+
+    {{if .Result.PartialErrors}}
+    <div class="notice notice-warn">
+      <strong>一部のデータを取得できませんでした（HTTP 200 の部分成功）</strong>
+      <ul>{{range .Result.PartialErrors}}<li>{{.}}</li>{{end}}</ul>
+    </div>
+    {{end}}
+
+    {{if .Result.Users}}
+    {{/* 列数の切り替えと CSV 保存。どちらも課金も通信も無く、このページで完結するので「操作」に置く
+         （結果ページの絞り込みと同類）。フォーム要素で囲まない（D-47）。囲むと Enter や送信で
+         この URL を読み直し、再取得（課金）になり得る。
+
+         JS が動かない環境ではどちらも使えないので、JS が hidden を外すまで見せない（D-52）。
+         hidden はこのブロックと CSV のボタンにだけ付け、サイドバー全体には付けない（下の参照情報は
+         JS が無くても意味がある）。ボタンにも付けるのは、列数は動いても保存の手段（Blob など）が
+         無いブラウザでは、ボタンだけを出さずにおけるようにするため。 */}}
+    <div class="list-controls" id="list-controls" hidden>
+      {{- template "_cols.html"}}
+      <div class="actions">
+        <button type="button" id="csv-download" class="secondary" hidden aria-describedby="csv-note">このページを CSV で保存（{{num .Result.ResultCount}} 人）</button>
+      </div>
+      <p class="hint" id="csv-note">追加のコストはかかりません（API を呼ばず、表示中の {{num .Result.ResultCount}} 人だけを保存します）。</p>
+    </div>
+    {{end}}
+
+    {{/* ここから下は参照情報。対象のユーザー名は URL から来る値で、取得そのものは ID で行うので、ID も並べる。
+         セッション累計はヘッダのバッジに出ているので繰り返さない（結果ページと同じ）。 */}}
+    <ul class="meta-list">
+      <li>対象: {{if .TargetUsername}}@{{.TargetUsername}}・{{end}}ユーザー ID {{.TargetID}}</li>
+      <li>表示中 <span class="strong">{{num .Result.ResultCount}} 人</span>（1 ページ {{num .PageSize}} 人）</li>
+      <li>今回の推定コスト: <span class="strong">{{usd .Result.SpentUSD}}</span>（{{num .Result.ResultCount}} 人 × {{usd .UnitCost}}）</li>
+      {{if .Result.RateLimit}}<li>レートリミット残り: {{.Result.RateLimit.Remaining}} / {{.Result.RateLimit.Limit}}{{if .RateLimitReset}}（{{.RateLimitReset}} にリセット・{{.TZ}}）{{end}}</li>{{end}}
+    </ul>
+
+    <p class="hint">このページの再読み込みは再取得になります（同じ UTC 日に同じユーザーを取得し直した分は重複排除で課金されにくくなりますが、ソフト保証のため確実ではありません。レートリミットは消費します）。</p>
+  </div>
+
+  <div class="results-main">
+    {{if .Result.Users}}
+    {{/* 結果ページの .post-list と同じグリッドと列数の閾値を使う。id は投稿の一覧（post-list）と分け、
+         投稿に向けた JS の処理（絞り込み）の対象にしない（カードの作りが違い、絞り込みの条件も当てはまらない）。 */}}
+    <div class="post-list user-list" id="user-list">
+      {{range .Result.Users}}{{template "_user.html" .}}{{end}}
+    </div>
+    {{else}}
+    <div class="notice">
+      {{if .Continued}}
+      <strong>このページに返ったフォロワーはいませんでした。</strong>
+      {{else}}
+      <strong>フォロワーは 0 人でした。</strong>
+      {{end}}
+      <p class="hint">返ったユーザーが 0 人のため、課金は発生していません（課金は返ったユーザーの人数ぶんです）。</p>
+    </div>
+    {{end}}
+
+    {{/* 前のページも取り直しになり課金されるので、次のページと同じく金額を出す。金額は 1 ページの人数ぶんの
+         最大額で、実際の課金は返った人数ぶん。 */}}
+    <div class="paging">
+      {{if .PrevURL}}
+        {{if .PagingBlocked}}
+        <span class="btn secondary" aria-disabled="true">前の {{num .PageSize}} 人を取得（実行不可）</span>
+        {{else}}
+        <a class="btn secondary" href="{{.PrevURL}}">前の {{num .PageSize}} 人を取得（+{{usd2 .NextCost}}）</a>
+        {{end}}
+      {{else}}<span></span>{{end}}
+
+      {{if .NextURL}}
+        {{if .PagingBlocked}}
+        <span class="btn" aria-disabled="true">次の {{num .PageSize}} 人を取得（実行不可）</span>
+        {{else}}
+        <a class="btn" href="{{.NextURL}}">次の {{num .PageSize}} 人を取得（+{{usd2 .NextCost}}）</a>
+        {{end}}
+      {{end}}
+    </div>
+
+    {{if .PagingBlocked}}
+    <div class="notice notice-error"><p>{{.PagingReason}}</p></div>
+    {{end}}
+
+    <div class="actions">
+      <a class="btn secondary" href="{{.FormURL}}">別のアカウントを調べる</a>
+      {{if .EstimateURL}}<a class="btn secondary" href="{{.EstimateURL}}">このアカウントを再見積り（+{{usd .LookupCost}}）</a>{{end}}
+    </div>
+  </div>
+</div>
+
+{{/* CSV のデータブロック。html/template はこの要素の中を JS の文脈として扱い、CSVExport を JSON にして
+     < > & を Unicode エスケープに置き換える。表示名や自己紹介に閉じタグがあっても要素から抜け出せない。
+     ブラウザは type が application/json の要素を実行しない（データとして読むだけ）ので、CSP の script-src の
+     対象にもならない。
+
+     【data 属性に移さない】HTML を読むときに CR が LF に直され、CSV の改行が変わる（view.CSVExport）。
+     【template.JS などで包まない】エスケープが外れる。
+     フォロワーがいないページでは出さない（保存するものが無く、ボタンも出ない）。 */}}
+{{if .Result.Users}}<script type="application/json" id="csv-data">{{.CSV}}</script>{{end}}
+
+{{template "bottom" .}}

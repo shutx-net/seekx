@@ -133,6 +133,77 @@ func CountsCostFor(e xapi.Endpoint) float64 {
 	return xapi.CostPerCountsRecent
 }
 
+// UserLookupCost はユーザー検索 1 回の金額（User: Read のユーザー 1 人分）を返す。
+// フォロワー取得の見積りボタンのラベルと、セッション累計への計上に使う。
+// ハンドラが xapi の単価を直接参照しないための入口（main.go の file_layout）。
+// 存在しない・凍結されたユーザーは data が返らず課金されないので、計上はユーザーが返ったときだけにする。
+func UserLookupCost() float64 { return xapi.CostPerUserRead }
+
+// FollowersCostFor はフォロワー n 人分の金額（Following/Followers: Read）を返す。
+// 課金は返ったユーザーの人数単位なので、ページングのラベル（最大額）には max_results を、
+// 実費（セッション累計への計上）には実際に返った人数を渡す。
+// 0 以下は 0 を返す（負の金額でセッション累計が減らないようにする）。
+func FollowersCostFor(n int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return float64(n) * xapi.CostPerFollowsRead
+}
+
+// FollowersEstimate はフォロワー数からのフォロワー取得の見積り。
+//
+// 金額は UTC の 1 日内の重複排除（同じユーザーを同じ日に取り直しても課金されにくい）を考慮しない
+// 上限側の値。重複排除はソフト保証で必ず効くとは限らないので、安くなる見込みを金額に織り込まない。
+// フォロワー数は取得までの間にも増減するため、実費の厳密な上限ではない。
+// 見積りのためのユーザー検索の金額（UserLookupCost）は含めない。
+type FollowersEstimate struct {
+	Total      int  // フォロワー数（public_metrics.followers_count）。不明なら 0
+	TotalKnown bool // フォロワー数を取得できたか（public_metrics が欠けていれば false）
+	PageSize   int  // 1 ページの人数（max_results）
+	Pages      int  // 全員を取得するのに要るページ数（端数のページも 1 ページに数える）。不明なら 0
+	FirstPage  int  // 最初のページで返る人数の見込み。不明なら PageSize（上限側に倒す）
+
+	FirstPageUSD float64 // 最初のページの金額の見込み（FirstPage 人分）
+	PageMaxUSD   float64 // 1 ページの最大額（PageSize 人分）。総数に依らない（取得ボタンとページングのラベル用）
+	TotalUSD     float64 // 全員を取得したときの金額（Total 人分）。不明なら 0
+}
+
+// EstimateFollowers はフォロワー数（total）と 1 ページの人数（pageSize）からフォロワー取得の
+// ページ数と金額を見積る。known はフォロワー数を取得できたか（public_metrics があったか）。
+//
+// 不明なときは total を使わず（Total・Pages・TotalUSD は 0）、最初のページは pageSize 人が返るものとして
+// 上限側で見積る。負の total も不明として扱う（0 人と見なすと最初のページを少なく見積もるため）。
+// pageSize が 0 以下（検証を経ずに渡った値）でもゼロ除算せず、ページ数と 1 ページの金額を 0 にする。
+func EstimateFollowers(total int, known bool, pageSize int) FollowersEstimate {
+	if pageSize < 0 {
+		pageSize = 0
+	}
+	if total < 0 {
+		known = false
+	}
+	e := FollowersEstimate{
+		TotalKnown: known,
+		PageSize:   pageSize,
+		PageMaxUSD: FollowersCostFor(pageSize),
+	}
+	if !known {
+		e.FirstPage = pageSize
+		e.FirstPageUSD = e.PageMaxUSD
+		return e
+	}
+	e.Total = total
+	if pageSize > 0 {
+		e.Pages = total / pageSize
+		if total%pageSize != 0 {
+			e.Pages++
+		}
+	}
+	e.FirstPage = min(total, pageSize)
+	e.FirstPageUSD = FollowersCostFor(e.FirstPage)
+	e.TotalUSD = FollowersCostFor(total)
+	return e
+}
+
 // SessionSpend はプロセス起動からの累計推定コスト。
 type SessionSpend struct {
 	mu    sync.Mutex
@@ -174,6 +245,9 @@ func (s *SessionSpend) CallCount() int {
 //
 // セッション累計に対する上限は持たない。プロセス単位のブレーキは再起動で 0 に戻るため
 // 支出の天井として機能せず、「止まったら再起動する」を促すだけだった。累計は表示に使う。
+//
+// 月次 cap は post read の上限なので、投稿を返さない経路（ユーザー検索・フォロワー取得）は
+// これを直接呼ばず、GateAllowsFor に ReadUsers を渡して判定する。
 func GateAllows(cap CapStatus, cfg config.Config) (bool, string) {
 	if cap.Level == CapBlock && !cfg.AllowOverCap {
 		return false, fmt.Sprintf(
@@ -181,4 +255,31 @@ func GateAllows(cap CapStatus, cfg config.Config) (bool, string) {
 			cap.Percent(), cap.Usage, cap.Cap, cap.ResetDay)
 	}
 	return true, ""
+}
+
+// ReadKind は課金経路が読み取るリソースの種類。月次 cap ガードを掛けるかどうかを分けるために使う。
+type ReadKind int
+
+const (
+	// ReadPosts は投稿の読み取り（投稿の検索）。月次 cap ガードの対象。
+	// ゼロ値にしてあるのは、種類を渡し忘れたときにガードが効く側へ倒すため。
+	ReadPosts ReadKind = iota
+	// ReadUsers はユーザーの読み取り（ユーザー検索・フォロワー取得）。月次 cap ガードの対象外。
+	ReadUsers
+)
+
+// GateAllowsFor は読み取りの種類ごとに課金経路を通してよいかを判定する。
+// ReadUsers は常に (true, "") を返し、それ以外（ReadPosts と未知の値）は GateAllows に委ねる。
+//
+// 【ユーザーの読み取りを月次 cap で止めない】月次 cap（/2/usage/tweets の project_cap）は
+// post read の上限で、ユーザー検索とフォロワー取得は投稿を返さない（expansions を付けられない型に
+// してある。xapi.UserLookupParams / xapi.FollowersParams）ので cap を消費しない。Block 中に止めても
+// cap は減らず、関係の無い理由で正当な操作を止めるだけになる。
+// 支出は、クリックごとの金額表示とセッション累計で見せる（セッション予算の上限は廃止済み。
+// 理由は GateAllows のコメント）。
+func GateAllowsFor(kind ReadKind, cap CapStatus, cfg config.Config) (bool, string) {
+	if kind == ReadUsers {
+		return true, ""
+	}
+	return GateAllows(cap, cfg)
 }

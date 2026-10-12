@@ -1,0 +1,66 @@
+{{template "top" .}}
+
+<h1>フォロワー取得の見積り</h1>
+
+{{if .Warnings}}
+<div class="notice notice-warn">
+  <ul>{{range .Warnings}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
+
+<div class="user-target">{{template "_user.html" .User}}</div>
+
+{{/* フォロワー数が不明（public_metrics が欠けた応答）のとき、cost.EstimateFollowers は Total・Pages・
+     TotalUSD を 0 にする。【不明を 0 として出さない】出すと「$0.00（約 0 ページ）」と読めてしまうので、
+     全件の行は TotalKnown で分ける。最初のページは不明でも 1 ページの人数（上限側）で見積ってある。 */}}
+<ul class="meta-list">
+  {{if .Est.TotalKnown}}
+  <li>フォロワー数: <span class="strong">{{num .Est.Total}} 人</span></li>
+  {{if .NoFollowers}}
+  <li>全件の予想コスト: <span class="strong">{{usd2 .Est.TotalUSD}}</span>（取得するフォロワーはいません）</li>
+  {{else}}
+  <li>全件の予想コスト: <span class="strong">{{usd2 .Est.TotalUSD}}</span>（1 ページ {{num .Est.PageSize}} 人で約 {{num .Est.Pages}} ページ）</li>
+  {{end}}
+  {{else}}
+  <li>フォロワー数: <span class="strong">不明</span>（X API がフォロワー数を返しませんでした）</li>
+  <li>全件の予想コスト: <span class="strong">不明</span>（フォロワー数が分からないため計算できません）</li>
+  {{end}}
+  <li>今回取得する人数の見込み: <span class="strong">{{num .Est.FirstPage}} 人・{{usd2 .Est.FirstPageUSD}}</span>（最初の 1 ページ{{if not .Est.TotalKnown}}。フォロワー数が不明なため 1 ページの上限で見積っています{{end}}）</li>
+  <li>この見積り自体のコスト: {{usd .LookupCost}}（ユーザー 1 人・すでに発生しています）</li>
+  {{if .Cap.Known}}<li>月次 cap: {{num .Cap.Usage}} / {{num .Cap.Cap}}（{{pct .Cap.Percent}}・リセットは毎月 {{.Cap.ResetDay}} 日）。フォロワー取得は post reads を消費しないため、この cap の対象外です。</li>{{end}}
+</ul>
+
+<p class="hint">
+  金額は上限側の見込みです。同じ UTC 日に同じユーザーを取得し直した分は重複排除で課金されにくくなりますが、
+  ソフト保証のため金額には織り込んでいません。フォロワー数は取得までの間にも増減します。
+</p>
+<p class="hint">App-only の Bearer Token を使うため、自分のアカウントのフォロワーでも Owned Reads（自分のデータを読むときの割安な単価）は適用されません。</p>
+
+{{if .NoFollowers}}
+{{/* 取得しても返るユーザーがいないので、取得のリンクは出さない。 */}}
+<div class="notice">
+  <strong>フォロワーは 0 人です（取得するものはありません）。</strong>
+  <p class="hint">フォロワーが増えたかどうかは、再見積りで確かめられます。</p>
+</div>
+{{else if not .Allowed}}
+<div class="notice notice-error">
+  <strong>実行できません</strong>
+  <p>{{.GateReason}}</p>
+</div>
+{{end}}
+
+<div class="actions">
+  {{if not .NoFollowers}}
+    {{if .Allowed}}
+    <a class="btn" href="{{.ExecuteURL}}">最初の {{num .Est.PageSize}} 人を取得する（最大 {{usd2 .Est.PageMaxUSD}}）</a>
+    {{else}}
+    <span class="btn" aria-disabled="true">最初の {{num .Est.PageSize}} 人を取得する（実行不可）</span>
+    {{end}}
+  {{end}}
+  <a class="btn secondary" href="{{.FormURL}}">条件を修正する</a>
+  <a class="btn secondary" href="{{.ReestimateURL}}">再見積り（+{{usd .LookupCost}}）</a>
+</div>
+{{if not .NoFollowers}}<p class="hint">フォロワーは 1 ページずつ取得し、そのたびに金額を表示します（一括取得はありません）。課金は返ったユーザーの人数ぶんです。</p>{{end}}
+<p class="hint">このページを再読み込みすると、ユーザー検索をやり直します（+{{usd .LookupCost}}）。</p>
+
+{{template "bottom" .}}

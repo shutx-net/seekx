@@ -436,8 +436,43 @@ a.author-name:hover { text-decoration: underline; }
   margin-top: 6px;
 }
 
+/* ---------- ユーザーカード（フォロワー一覧・見積り画面の対象ユーザー） ---------- */
+
+/* 頭の部分（アバター・名前・X ロゴ）と指標は投稿カードのクラスを共用し（_user.html）、
+   ここではカードの枠と、ユーザーにしか無い自己紹介・場所などの行だけを持つ。
+
+   枠は .post に揃える。【margin は持たせない。】一覧では grid の gap が間隔を持ち
+   （.post は .post-list > .post で margin を打ち消している）、見積り画面では .user-target が持つ。
+   min-width: 0 は .post-list > .post と同じく、トラック側の minmax(0, ...) と対になる保険。 */
+.user-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: var(--gap);
+  background: var(--bg);
+  min-width: 0;
+}
+
+/* 自己紹介は未加工で出し、改行は <br> に置き換えずに CSS で表す（投稿の本文と同じ・D-24）。 */
+.user-bio {
+  white-space: pre-wrap;
+  margin: 10px 0 0;
+}
+
+.user-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* 見積り画面のカード 1 枚。カードが margin を持たないので、上下の間隔はここで空ける。 */
+.user-target { margin: var(--gap) 0; }
+
 /* ---------- 検索結果一覧（列数切り替え） ---------- */
 
+/* フォロワー一覧も class="post-list user-list" で同じグリッドと列数の閾値を使う（followers.html）。 */
 .post-list {
   display: grid;
   gap: var(--gap);
